@@ -87,6 +87,11 @@ def _materialized_routes(app: "FastAPI"):
     ("path", "route_path", "surface"),
     [
         ("/api/knowledge-bases", "/api/knowledge-bases", "reading"),
+        (
+            "/api/knowledge-bases/list",
+            "/api/knowledge-bases/list",
+            "reading",
+        ),
         ("/api/knowledge-bases/demo", "/api/knowledge-bases/{kb_name}", "reading"),
         ("/api/knowledge-bases/demo/files", "/api/knowledge-bases/{kb_name}/files", "reading"),
         (
