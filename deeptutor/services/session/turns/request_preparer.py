@@ -442,9 +442,14 @@ class TurnRequestPreparer:
         )
         selected_mcp = list((payload.get("mcp") if mcp_explicit else preferences.get("mcp")) or [])
         payload = {**payload, "skills": selected_skills, "mcp": selected_mcp}
-        raw_llm_selection = payload.get("llm_selection")
-        if raw_llm_selection is None:
-            raw_llm_selection = preferences.get("llm_selection")
+        # An explicit null means "use the configured default". Preserve a
+        # stored session override only when the caller omitted the field.
+        llm_selection_explicit = "llm_selection" in payload
+        raw_llm_selection = (
+            payload.get("llm_selection")
+            if llm_selection_explicit
+            else preferences.get("llm_selection")
+        )
         try:
             llm_selection = _llm_selection_dict(raw_llm_selection)
         except ValueError as exc:
@@ -631,7 +636,9 @@ class TurnRequestPreparer:
                         "course_id": str(parent_preferences.get("course_id") or ""),
                     }
                 )
-        if llm_selection:
+        if llm_selection_explicit:
+            preference_update["llm_selection"] = llm_selection or None
+        elif llm_selection:
             preference_update["llm_selection"] = llm_selection
         if persona_explicit:
             # Persist explicit set AND explicit clear ("" = back to Default).
@@ -921,7 +928,7 @@ class TurnRequestPreparer:
 
         llm_selection = (
             overrides.get("llm_selection")
-            if overrides.get("llm_selection") is not None
+            if "llm_selection" in overrides
             else snapshot.get("llmSelection") or preferences.get("llm_selection")
         )
         mastery_path_id = _mastery_path_id(
@@ -1033,7 +1040,7 @@ class TurnRequestPreparer:
         }
         if previous_turn_id:
             payload["superseded_turn_id"] = previous_turn_id
-        if llm_selection:
+        if llm_selection or "llm_selection" in overrides:
             payload["llm_selection"] = llm_selection
 
         if replay_snapshot:

@@ -1323,10 +1323,11 @@ export default function ChatWorkspace({
     void refreshUserEnabledTools();
   }, [refreshUserEnabledTools]);
 
+  // The main chat always follows the configured default. Clear older
+  // per-session selections restored from saved conversations as well.
   useEffect(() => {
-    if (state.llmSelection || !activeLLMDefault) return;
-    setLLMSelection(activeLLMDefault);
-  }, [activeLLMDefault, setLLMSelection, state.llmSelection]);
+    if (state.llmSelection) setLLMSelection(null);
+  }, [setLLMSelection, state.llmSelection]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -2180,7 +2181,7 @@ export default function ChatWorkspace({
   );
 
   const handleRegenerateMessage = useCallback(() => {
-    regenerateLastMessage();
+    regenerateLastMessage(false, true);
   }, [regenerateLastMessage]);
 
   const handleResendMessage = useCallback(() => {
@@ -2722,6 +2723,7 @@ export default function ChatWorkspace({
                 subagentBudget={subagentBudget}
                 onSubagentBudgetChange={setSubagentBudget}
                 llmOptions={llmOptions}
+                allowModelSelection={false}
                 activeLLMDefault={activeLLMDefault}
                 llmSelection={state.llmSelection}
                 llmOptionsLoading={llmOptionsLoading}

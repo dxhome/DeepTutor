@@ -12,6 +12,7 @@ import secrets
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -590,6 +591,53 @@ def _wait_for_http(
     raise RuntimeError(_t("start.not_ready", name=name, timeout=timeout, env=env_name))
 
 
+def _wait_for_tcp(
+    *, name: str, port: int, process: ManagedProcess,
+    timeout: int, should_stop: Callable[[], bool],
+) -> None:
+    """Wait for the local TLS listener without requiring client CA trust."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if should_stop():
+            return
+        if process.process.poll() is not None:
+            raise RuntimeError(_t("start.exited", name=name, code=process.process.returncode))
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                _log(_t("start.ready", name=name))
+                return
+        except OSError:
+            time.sleep(0.5)
+    raise RuntimeError(_t("start.not_ready", name=name, timeout=timeout, env=FRONTEND_READY_TIMEOUT_ENV))
+
+
+def _https_options(
+    cert: str | Path | None, key: str | Path | None,
+    host: str | None, port: int,
+) -> tuple[Path, Path, str, int] | None:
+    if cert is None and key is None and host is None:
+        if port != 3783:
+            raise SystemExit("--https-port requires --https-cert, --https-key, and --https-host.")
+        return None
+    if cert is None or key is None or not host:
+        raise SystemExit("HTTPS requires --https-cert, --https-key, and --https-host together.")
+    if not 1 <= port <= 65535:
+        raise SystemExit("--https-port must be between 1 and 65535.")
+    public_host = host.strip()
+    if not public_host or any(char in public_host for char in "/:@ \\?#"):
+        raise SystemExit("--https-host must be a hostname or IPv4 address, without a scheme or port.")
+    cert_path = Path(cert).expanduser().resolve()
+    key_path = Path(key).expanduser().resolve()
+    if not cert_path.is_file() or not key_path.is_file():
+        raise SystemExit("HTTPS certificate and private key must be readable files.")
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    except (OSError, ssl.SSLError) as exc:
+        raise SystemExit(f"Invalid HTTPS certificate or private key: {exc}") from exc
+    return cert_path, key_path, public_host, port
+
+
 def _http_ready(url: str, *, timeout: float) -> bool:
     try:
         with _LOOPBACK_OPENER.open(url, timeout=timeout):  # noqa: S310  # nosec B310 - loopback health check
@@ -1078,6 +1126,7 @@ def _launch_detached(
     *,
     dev: bool,
     open_browser: bool,
+    https_options: tuple[Path, Path, str, int] | None,
 ) -> None:
     """Start a launcher outside the caller's console process group."""
 
@@ -1104,6 +1153,12 @@ def _launch_detached(
         command.append("--dev")
     if not open_browser:
         command.append("--no-browser")
+    if https_options is not None:
+        cert, key, host, port = https_options
+        command.extend([
+            "--https-cert", str(cert), "--https-key", str(key),
+            "--https-host", host, "--https-port", str(port),
+        ])
 
     env = os.environ.copy()
     env[DEEPTUTOR_HOME_ENV] = str(runtime_home.resolve())
@@ -1267,6 +1322,10 @@ def start(
     dev: bool = False,
     detach: bool = False,
     open_browser: bool = True,
+    https_cert: str | Path | None = None,
+    https_key: str | Path | None = None,
+    https_host: str | None = None,
+    https_port: int = 3783,
 ) -> None:
     _relax_console_encoding()
     runtime_home = get_runtime_home(home)
@@ -1275,12 +1334,16 @@ def start(
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     runtime_home.mkdir(parents=True, exist_ok=True)
+    https_options = _https_options(https_cert, https_key, https_host, https_port)
 
     global _ACTIVE_LABELS
     language = resolve_language()
     _ACTIVE_LABELS = labels_for(language)
     if detach:
-        _launch_detached(runtime_home, dev=dev, open_browser=open_browser)
+        _launch_detached(
+            runtime_home, dev=dev, open_browser=open_browser,
+            https_options=https_options,
+        )
         return
 
     detached_token = os.getenv(DETACHED_TOKEN_ENV, "").strip()
@@ -1289,6 +1352,12 @@ def start(
     restart_argv = ["start", "--home", str(runtime_home.resolve())]
     if dev:
         restart_argv.append("--dev")
+    if https_options is not None:
+        cert, key, host, port = https_options
+        restart_argv.extend([
+            "--https-cert", str(cert), "--https-key", str(key),
+            "--https-host", host, "--https-port", str(port),
+        ])
     os.environ[DEEPTUTOR_HOME_ENV] = str(runtime_home)
     _reset_runtime_singletons()
 
@@ -1314,6 +1383,8 @@ def start(
 
     backend_port = settings.backend_port
     frontend_port = settings.frontend_port
+    if https_options is not None and https_port in {backend_port, frontend_port}:
+        raise SystemExit("--https-port must differ from the backend and frontend HTTP ports.")
     backend_url = f"http://127.0.0.1:{backend_port}"
     api_base = (
         runtime_env.get("NEXT_PUBLIC_API_BASE_EXTERNAL")
@@ -1328,6 +1399,8 @@ def start(
         dev=dev,
     )
     existing_frontend = _detect_existing_source_frontend(frontend)
+    if https_options is not None and existing_frontend is not None:
+        raise SystemExit("Stop the existing frontend before starting HTTPS so HTTP can bind to loopback only.")
     if existing_frontend is not None and not _http_ready(
         existing_frontend.url, timeout=FRONTEND_REUSE_PROBE_TIMEOUT
     ):
@@ -1364,10 +1437,34 @@ def start(
             dev=dev,
         )
 
+    if https_options is not None:
+        if https_port in {backend_port, frontend_port} or _port_accepts_connection(https_port):
+            raise SystemExit(f"HTTPS port {https_port} is already in use. Choose another --https-port.")
+        if not shutil.which("node"):
+            raise SystemExit("Node.js 20+ is required for the HTTPS frontend.")
+        # Keep the configured frontend port for HTTP redirects. Serve Next.js
+        # on a separate loopback port so both listeners can coexist.
+        internal_frontend_port = _suggest_free_port(
+            frontend_port + 1 if frontend_port < 65535 else 3784,
+            {backend_port, frontend_port, https_port},
+        )
+        if internal_frontend_port in {backend_port, frontend_port, https_port} or _port_accepts_connection(internal_frontend_port):
+            raise SystemExit("No free loopback port is available for the HTTPS frontend.")
+        frontend = _resolve_frontend(
+            runtime_home, internal_frontend_port,
+            api_base=api_base, auth_enabled=auth_enabled, dev=dev,
+        )
+    else:
+        internal_frontend_port = frontend_port
+
     frontend_url = (
         existing_frontend.url
         if existing_frontend is not None
-        else f"http://localhost:{frontend_port}"
+        else f"http://localhost:{internal_frontend_port}"
+    )
+    browser_url = (
+        f"https://{https_options[2]}:{https_options[3]}"
+        if https_options is not None else frontend_url
     )
 
     print_banner(language=language, mode_key="start.mode")
@@ -1375,6 +1472,9 @@ def start(
     if api_base != backend_url:
         _log(f"{_t('start.browser_api'):<10} {api_base}")
     _log(f"{_t('start.frontend'):<10} {frontend_url}")
+    if https_options is not None:
+        _log(f"{'HTTPS':<10} {browser_url}")
+        _log(f"{'HTTP':<10} http://{https_options[2]}:{frontend_port} → {browser_url}")
     _log(f"{_t('start.workspace'):<10} {runtime_home}")
     _log(f"{_t('start.frontend_runtime')}: {frontend.kind}")
     _log(_t("start.press_ctrl_c"))
@@ -1384,8 +1484,8 @@ def start(
     common_env[DEEPTUTOR_HOME_ENV] = str(runtime_home)
     common_env["BACKEND_PORT"] = str(backend_port)
     common_env["FRONTEND_PORT"] = str(frontend_port)
-    common_env["PORT"] = str(frontend_port)
-    common_env["HOSTNAME"] = "0.0.0.0"
+    common_env["PORT"] = str(internal_frontend_port)
+    common_env["HOSTNAME"] = "127.0.0.1" if https_options is not None else "0.0.0.0"
     common_env["NEXT_PUBLIC_API_BASE"] = api_base
     common_env["NEXT_PUBLIC_AUTH_ENABLED"] = "true" if auth_enabled else "false"
     # The Next.js middleware (web/proxy.ts) runs in the frontend's Node runtime
@@ -1432,7 +1532,7 @@ def start(
         "uvicorn",
         "deeptutor.api.main:app",
         "--host",
-        "0.0.0.0",
+        "127.0.0.1" if https_options is not None else "0.0.0.0",
         "--port",
         str(backend_port),
         "--log-level",
@@ -1464,6 +1564,7 @@ def start(
     processes: list[ManagedProcess] = []
     backend: ManagedProcess | None = None
     web: ManagedProcess | None = None
+    https_proxy: ManagedProcess | None = None
     shutdown_requested = False
     cleanup_started = False
     exit_code = 0
@@ -1490,6 +1591,7 @@ def start(
         if cleanup_started:
             return
         cleanup_started = True
+        _terminate(https_proxy)
         _terminate(web)
         _terminate(backend)
         if detached_paths is not None:
@@ -1529,15 +1631,39 @@ def start(
             )
         else:
             _log(_t("start.starting_frontend"))
-            web = _spawn(frontend.command, cwd=frontend.cwd, env=common_env, name="frontend")
+            frontend_command = list(frontend.command)
+            if https_options is not None and frontend.kind == "source":
+                frontend_command.extend(["--hostname", "127.0.0.1"])
+            web = _spawn(frontend_command, cwd=frontend.cwd, env=common_env, name="frontend")
             processes.append(web)
             _wait_for_http(
                 name=_t("start.frontend"),
-                url=f"http://127.0.0.1:{frontend_port}/",
+                url=f"http://127.0.0.1:{internal_frontend_port}/",
                 process=web,
                 timeout=FRONTEND_READY_TIMEOUT,
                 env_name=FRONTEND_READY_TIMEOUT_ENV,
                 should_stop=should_stop,
+            )
+        if should_stop():
+            return
+        if https_options is not None:
+            cert, key, _host, port = https_options
+            proxy_script = Path(__file__).with_name("https_proxy.cjs")
+            https_proxy = _spawn(
+                [
+                    shutil.which("node") or "node", str(proxy_script), str(cert), str(key),
+                    str(port), str(internal_frontend_port), https_options[2], str(frontend_port),
+                ],
+                cwd=runtime_home, env=common_env, name="https",
+            )
+            processes.append(https_proxy)
+            _wait_for_tcp(
+                name="HTTPS frontend", port=port, process=https_proxy,
+                timeout=FRONTEND_READY_TIMEOUT, should_stop=should_stop,
+            )
+            _wait_for_tcp(
+                name="HTTP redirect", port=frontend_port, process=https_proxy,
+                timeout=FRONTEND_READY_TIMEOUT, should_stop=should_stop,
             )
         if should_stop():
             return
@@ -1546,13 +1672,13 @@ def start(
             _mark_detached_ready(
                 detached_paths,
                 token=detached_token,
-                frontend_url=frontend_url,
+                frontend_url=browser_url,
                 backend_port=backend_port,
                 frontend_port=frontend_port,
             )
-        _log(_t("start.open_in_browser", url=frontend_url))
+        _log(_t("start.open_in_browser", url=browser_url))
         if open_browser:
-            _open_frontend_in_browser(frontend_url)
+            _open_frontend_in_browser(browser_url)
 
         while not should_stop():
             if _handoff_pending_update(runtime_home, restart_argv=restart_argv):

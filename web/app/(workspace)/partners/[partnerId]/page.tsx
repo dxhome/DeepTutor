@@ -639,7 +639,7 @@ function PartnerDetail() {
           its WebSocket and live trace — survives switching to another tab. */}
       <div className="min-h-0 flex-1">
         <div className={activeTab === "chat" ? "h-full" : "hidden"}>
-          <div className="mx-auto h-full max-w-3xl px-5">
+          <div className="mx-auto h-full w-full max-w-[960px] px-6">
             <PartnerChat
               partnerId={partnerId}
               partnerName={partner.name}

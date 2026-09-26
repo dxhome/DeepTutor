@@ -23,6 +23,7 @@ from .plugin import register as register_plugin
 from .provider_cmd import register as register_provider
 from .session_cmd import register as register_session
 from .skill import register as register_skill
+from .tls import register as register_tls
 from .workspace_cmd import register as register_workspace
 
 set_mode(RunMode.CLI)
@@ -47,6 +48,7 @@ notebook_app = typer.Typer(help="Manage notebooks and imported markdown records.
 provider_app = typer.Typer(help="Manage provider OAuth login.")
 book_app = typer.Typer(help="Manage interactive Books (BookEngine).")
 workspace_app = typer.Typer(help="Manage the user content workspace.")
+tls_app = typer.Typer(help="Create certificates for the optional HTTPS frontend.")
 
 app.add_typer(partner_app, name="partner")
 app.add_typer(chat_app, name="chat")
@@ -61,6 +63,7 @@ app.add_typer(notebook_app, name="notebook")
 app.add_typer(provider_app, name="provider")
 app.add_typer(book_app, name="book")
 app.add_typer(workspace_app, name="workspace")
+app.add_typer(tls_app, name="tls")
 
 register_partner(partner_app)
 register_chat(chat_app)
@@ -74,6 +77,7 @@ register_notebook(notebook_app)
 register_provider(provider_app)
 register_book(book_app)
 register_workspace(workspace_app)
+register_tls(tls_app)
 register_doctor(app)
 register_init(app)
 
@@ -142,11 +146,32 @@ def start(
         "--open-browser/--no-browser",
         help="Open the frontend automatically after startup.",
     ),
+    https_cert: Path | None = typer.Option(
+        None, "--https-cert", help="PEM certificate chain for the HTTPS frontend."
+    ),
+    https_key: Path | None = typer.Option(
+        None, "--https-key", help="PEM private key for the HTTPS frontend."
+    ),
+    https_host: str | None = typer.Option(
+        None, "--https-host", help="Hostname or IP covered by the certificate, shown in the HTTPS URL."
+    ),
+    https_port: int = typer.Option(
+        3783, "--https-port", min=1, max=65535, help="HTTPS frontend port."
+    ),
 ) -> None:
     """Launch backend + frontend together. Source installs default to production."""
     from deeptutor.runtime.launcher import start as start_web
 
-    start_web(home=home, dev=dev, detach=detach, open_browser=open_browser)
+    start_web(
+        home=home,
+        dev=dev,
+        detach=detach,
+        open_browser=open_browser,
+        https_cert=https_cert,
+        https_key=https_key,
+        https_host=https_host,
+        https_port=https_port,
+    )
 
 
 @app.command()

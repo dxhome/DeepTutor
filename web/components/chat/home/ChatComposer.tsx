@@ -55,6 +55,7 @@ import type { SelectedReadingReference } from "@/lib/reading-references";
 import AgentSelector from "./AgentSelector";
 import PartnerSelector from "./PartnerSelector";
 import { listPartners, type PartnerInfo } from "@/lib/partners-api";
+import { listPersonas, type PersonaInfo } from "@/lib/personas-api";
 import PartnerGroupSelector from "./PartnerGroupSelector";
 import { listPartnerGroups, type PartnerGroup } from "@/lib/partner-groups-api";
 import ContextBudgetChip, { type ContextBudget } from "./ContextBudgetChip";
@@ -289,6 +290,7 @@ export default memo(function ChatComposer({
   inputPlaceholder,
   inputPlaceholderCompletion,
   inputHeader,
+  allowModelSelection = true,
   showCapabilityChip = true,
 }: {
   composerRef: RefObject<HTMLDivElement | null>;
@@ -451,6 +453,8 @@ export default memo(function ChatComposer({
    * of the message being written instead of a card floating over it.
    */
   inputHeader?: ReactNode;
+  /** Hide per-turn model switching on the main chat surface. */
+  allowModelSelection?: boolean;
   /**
    * Hide the capability chip. A surface that only ever runs one capability
    * — and names it in its own chrome — gains nothing from a picker that
@@ -460,10 +464,23 @@ export default memo(function ChatComposer({
 }) {
   const { t } = useTranslation();
   const [partners, setPartners] = useState<PartnerInfo[]>([]);
+  const [mentionPersonas, setMentionPersonas] = useState<PersonaInfo[]>([]);
   const [partnersLoading, setPartnersLoading] = useState(false);
   const [partnerLoadError, setPartnerLoadError] = useState(false);
   const canSelectPartner = Boolean(onSelectPartner);
   const canSelectGroup = Boolean(onSelectPartnerGroup);
+  useEffect(() => {
+    if (!onPersonaSelectionChange) return;
+    let active = true;
+    const refresh = () => {
+      void listPersonas({ force: true })
+        .then((items) => { if (active) setMentionPersonas(items); })
+        .catch(() => { if (active) setMentionPersonas([]); });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.removeEventListener("focus", refresh); };
+  }, [onPersonaSelectionChange]);
   useEffect(() => {
     if (!canSelectPartner) return;
     let active = true;
@@ -507,6 +524,7 @@ export default memo(function ChatComposer({
   const restoreFocusOnReturnRef = useRef(false);
   const inputHandleRef = useRef<ComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const voiceFileInputRef = useRef<HTMLInputElement>(null);
   const draftAttachmentsRef = useRef(attachments);
   const addDraftFilesRef = useRef(onAddFiles);
   useEffect(() => {
@@ -588,6 +606,33 @@ export default memo(function ChatComposer({
     inputHandleRef.current?.setValue(next);
   }, []);
   const recorder = useVoiceRecorder(handleTranscript);
+  const [showVoiceFallbackHint, setShowVoiceFallbackHint] = useState(false);
+  const voiceButtonLabel = !recorder.canRecord
+    ? t("Record or choose audio")
+    : recorder.state === "recording"
+      ? t("Stop recording")
+      : t("Record voice");
+  const voiceButtonTitle = recorder.error || (recorder.state === "requesting"
+    ? t("Waiting for microphone permission")
+    : voiceButtonLabel);
+
+  const handleVoiceClick = useCallback(() => {
+    if (recorder.canRecord) {
+      recorder.toggle();
+      return;
+    }
+    setShowVoiceFallbackHint(true);
+    voiceFileInputRef.current?.click();
+  }, [recorder]);
+
+  const handleVoiceFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setShowVoiceFallbackHint(false);
+      recorder.uploadAudio(file);
+    }
+    event.target.value = "";
+  }, [recorder]);
 
   const handlePickFiles = useCallback(() => {
     fileInputRef.current?.click();
@@ -1028,6 +1073,16 @@ export default memo(function ChatComposer({
             aria-hidden="true"
             tabIndex={-1}
           />
+          <input
+            ref={voiceFileInputRef}
+            type="file"
+            accept="audio/*"
+            capture="user"
+            onChange={handleVoiceFileChange}
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
 
           {inputHeader}
           <SelectedResources items={contextTreeItems}/>
@@ -1044,6 +1099,15 @@ export default memo(function ChatComposer({
             connectedAgents={connectedAgents}
             selectedAgent={selectedAgent}
             onSelectAgent={onSelectAgent}
+            mentionPersonas={mentionPersonas}
+            selectedPersona={personaSelection}
+            onSelectPersona={onPersonaSelectionChange}
+            mentionPartners={partners.map((partner) => ({
+              id: partner.partner_id,
+              name: partner.name,
+            }))}
+            selectedPartner={selectedPartner}
+            onSelectPartner={onSelectPartner}
             selectedCounts={spaceSelectionCounts}
             knowledgeAvailable={false}
             personaAvailable={!onPersonaSelectionChange}
@@ -1242,7 +1306,9 @@ export default memo(function ChatComposer({
                     open={spaceMenuOpen || Boolean(personaSelectorOpen)}
                     onOpenChange={(open) => {
                       onSetSpaceMenuOpen(open);
-                      if (!open) onPersonaSelectorOpenChange?.(false);
+                      if (!open) {
+                        onPersonaSelectorOpenChange?.(false);
+                      }
                     }}
                     requestedKey={personaSelectorOpen ? "persona" : undefined}
                     onBack={() => {
@@ -1285,43 +1351,36 @@ export default memo(function ChatComposer({
               </div>
 
               <div className={styles.actions}>
-                <ModelSelector
-                  options={llmOptions}
-                  activeDefault={activeLLMDefault}
-                  value={llmSelection}
-                  loading={llmOptionsLoading}
-                  error={llmOptionsError}
-                  onChange={onSelectLLM}
-                  onRefresh={onRefreshLLMOptions}
-                />
+                {allowModelSelection && (
+                  <ModelSelector
+                    options={llmOptions}
+                    activeDefault={activeLLMDefault}
+                    value={llmSelection}
+                    loading={llmOptionsLoading}
+                    error={llmOptionsError}
+                    onChange={onSelectLLM}
+                    onRefresh={onRefreshLLMOptions}
+                  />
+                )}
 
                 {contextBudget ? <ContextBudgetChip budget={contextBudget} /> : null}
 
                 <button
                   type="button"
-                  onClick={recorder.toggle}
-                  disabled={recorder.state === "transcribing" || isStreaming}
+                  onClick={handleVoiceClick}
+                  disabled={recorder.state === "requesting" || recorder.state === "transcribing" || isStreaming}
                   className={`group relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] transition-[background-color,color,transform] duration-150 active:scale-90 disabled:opacity-40 ${
                     recorder.state === "recording"
                       ? "bg-red-500/15 text-red-500"
                       : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/55 hover:text-[var(--foreground)]"
                   }`}
-                  aria-label={
-                    recorder.state === "recording"
-                      ? t("Stop recording")
-                      : t("Record voice")
-                  }
-                  title={
-                    recorder.error ||
-                    (recorder.state === "recording"
-                      ? t("Stop recording")
-                      : t("Record voice"))
-                  }
+                  aria-label={voiceButtonLabel}
+                  title={voiceButtonTitle}
                 >
                   {recorder.state === "recording" && (
                     <span className="pointer-events-none absolute inset-0 rounded-[10px] border border-red-500/40 animate-pulse" />
                   )}
-                  {recorder.state === "transcribing" ? (
+                  {recorder.state === "requesting" || recorder.state === "transcribing" ? (
                     <Loader2
                       size={16}
                       strokeWidth={1.9}
@@ -1375,6 +1434,18 @@ export default memo(function ChatComposer({
             </div>
           </div>
         </div>
+        {recorder.error && (
+          <p role="alert" className="mt-2 px-3 text-[12px] text-red-500">
+            {recorder.error}
+          </p>
+        )}
+        {showVoiceFallbackHint && !recorder.error && (
+          <p role="status" className="mt-2 px-3 text-[12px] text-[var(--muted-foreground)]">
+            {recorder.insecureContext
+              ? t("Live recording is blocked on a LAN HTTP address. Record or choose an audio file here; use HTTPS for live microphone input.")
+              : t("Choose an audio recording to transcribe.")}
+          </p>
+        )}
       </div>
     </div>
   );

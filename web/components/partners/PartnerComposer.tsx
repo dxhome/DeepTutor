@@ -7,7 +7,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Info, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Info, Loader2, Mic, Paperclip, Square, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { shouldSubmitOnEnter } from "@/lib/composer-keyboard";
 import {
@@ -28,6 +28,7 @@ import {
 } from "@/lib/file-attachments";
 import { useAutoSizedTextarea } from "@/lib/use-auto-sized-textarea";
 import { useImeComposing } from "@/lib/use-ime-composing";
+import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 
 export interface PartnerPendingAttachment {
   type: "image" | "file";
@@ -77,12 +78,14 @@ export const PartnerComposer = memo(function PartnerComposer({
   const attachmentLimits = useAttachmentLimits();
   const [dragging, setDragging] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [showVoiceFallbackHint, setShowVoiceFallbackHint] = useState(false);
   const [commands, setCommands] = useState<PartnerCommandInfo[]>([]);
   const [slashClosed, setSlashClosed] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const voiceFileInputRef = useRef<HTMLInputElement | null>(null);
   const restoreFocusOnReturnRef = useRef(false);
   const restoreFocusAfterSendRef = useRef(false);
   const dragCounterRef = useRef(0);
@@ -97,6 +100,40 @@ export const PartnerComposer = memo(function PartnerComposer({
       if (!disabled && !streaming) textareaRef.current?.focus();
     });
   }, [disabled, streaming]);
+
+  const handleTranscript = useCallback((text: string) => {
+    setInput((current) => current.trim()
+      ? `${current.trimEnd()} ${text}`
+      : text);
+    focusTextarea();
+  }, [focusTextarea]);
+  const recorder = useVoiceRecorder(handleTranscript);
+  const voiceButtonLabel = !recorder.canRecord
+    ? t("Record or choose audio")
+    : recorder.state === "recording"
+      ? t("Stop recording")
+      : t("Record voice");
+  const voiceButtonTitle = recorder.error || (recorder.state === "requesting"
+    ? t("Waiting for microphone permission")
+    : voiceButtonLabel);
+
+  const handleVoiceClick = useCallback(() => {
+    if (recorder.canRecord) {
+      recorder.toggle();
+      return;
+    }
+    setShowVoiceFallbackHint(true);
+    voiceFileInputRef.current?.click();
+  }, [recorder]);
+
+  const handleVoiceFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setShowVoiceFallbackHint(false);
+      recorder.uploadAudio(file);
+    }
+    event.target.value = "";
+  }, [recorder]);
 
   useEffect(() => {
     const rememberFocus = () => {
@@ -428,6 +465,16 @@ export const PartnerComposer = memo(function PartnerComposer({
         aria-hidden="true"
         tabIndex={-1}
       />
+      <input
+        ref={voiceFileInputRef}
+        type="file"
+        accept="audio/*"
+        capture="user"
+        onChange={handleVoiceFileChange}
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
+      />
 
       {slashOpen && (
         <div className="absolute bottom-full left-0 z-20 mb-2 w-full max-w-sm overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-lg">
@@ -551,6 +598,18 @@ export const PartnerComposer = memo(function PartnerComposer({
           {attachmentError}
         </div>
       )}
+      {recorder.error && (
+        <p role="alert" className="px-3.5 pb-2 text-[11px] text-red-600">
+          {recorder.error}
+        </p>
+      )}
+      {showVoiceFallbackHint && !recorder.error && (
+        <p role="status" className="px-3.5 pb-2 text-[11px] text-[var(--muted-foreground)]">
+          {recorder.insecureContext
+            ? t("Live recording is blocked on a LAN HTTP address. Record or choose an audio file here; use HTTPS for live microphone input.")
+            : t("Choose an audio recording to transcribe.")}
+        </p>
+      )}
 
       <div className="flex items-center justify-between px-2 pb-2">
         <div className="flex items-center gap-0.5">
@@ -595,27 +654,50 @@ export const PartnerComposer = memo(function PartnerComposer({
             )}
           </div>
         </div>
-        {streaming ? (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={onStop}
-            aria-label={t("Stop")}
-            title={t("Stop")}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--foreground)] text-[var(--background)] transition-opacity hover:opacity-90"
+            onClick={handleVoiceClick}
+            disabled={disabled || streaming || recorder.state === "requesting" || recorder.state === "transcribing"}
+            aria-label={voiceButtonLabel}
+            title={voiceButtonTitle}
+            className={`relative flex h-7 w-7 items-center justify-center rounded-full transition-colors disabled:opacity-30 ${
+              recorder.state === "recording"
+                ? "bg-red-500/15 text-red-500"
+                : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+            }`}
           >
-            <Square className="h-3 w-3" strokeWidth={2.2} fill="currentColor" />
+            {recorder.state === "recording" && (
+              <span className="pointer-events-none absolute inset-0 animate-pulse rounded-full border border-red-500/40" />
+            )}
+            {recorder.state === "requesting" || recorder.state === "transcribing" ? (
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+            ) : (
+              <Mic className="h-4 w-4" strokeWidth={1.9} />
+            )}
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label={t("Send")}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-30"
-          >
-            <ArrowUp className="h-4 w-4" strokeWidth={2.2} />
-          </button>
-        )}
+          {streaming ? (
+            <button
+              type="button"
+              onClick={onStop}
+              aria-label={t("Stop")}
+              title={t("Stop")}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--foreground)] text-[var(--background)] transition-opacity hover:opacity-90"
+            >
+              <Square className="h-3 w-3" strokeWidth={2.2} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label={t("Send")}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-foreground)] transition-opacity hover:opacity-90 disabled:opacity-30"
+            >
+              <ArrowUp className="h-4 w-4" strokeWidth={2.2} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1360,7 +1360,8 @@ interface ChatContextValue {
           answers?: Array<{ questionId: string; text: string }>;
         },
   ) => Promise<boolean>;
-  regenerateLastMessage: () => void;
+  /** Manual regeneration may opt into the current configured default model. */
+  regenerateLastMessage: (replaySnapshot?: boolean, useConfiguredDefault?: boolean) => void;
   /** Re-send the last user message after a failed turn, preserving the
    *  original request snapshot (attachments, capability, tools, KB, etc.)
    *  so the new turn runs with the same context as the failed one. */
@@ -2754,7 +2755,7 @@ export function ChatStateAdapterProvider({
     [sendThroughRunner],
   );
 
-  const regenerateLastMessage = useCallback((replaySnapshot = false) => {
+  const regenerateLastMessage = useCallback((replaySnapshot = false, useConfiguredDefault = false) => {
     const currentState = stateRef.current;
     const key = currentState.selectedKey;
     if (!key) return;
@@ -2779,9 +2780,12 @@ export function ChatStateAdapterProvider({
     sendThroughRunner(key, {
       type: "regenerate",
       session_id: session.sessionId,
-      overrides: replaySnapshot
-        ? { replay_snapshot: true }
-        : { language: readStoredResponseLanguage() },
+      overrides: {
+        ...(replaySnapshot
+          ? { replay_snapshot: true }
+          : { language: readStoredResponseLanguage() }),
+        ...(useConfiguredDefault ? { llm_selection: null } : {}),
+      },
     });
   }, [sendThroughRunner]);
 

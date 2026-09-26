@@ -1244,7 +1244,7 @@ export default function PartnerChat({
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex max-w-2xl flex-col gap-5">
+          <div className="mx-auto flex w-full max-w-[960px] flex-col gap-5">
             {olderBefore !== null ? (
               <button
                 type="button"
@@ -1384,7 +1384,7 @@ export default function PartnerChat({
         )}
       </div>
 
-      <div className="mx-auto w-full max-w-2xl px-1 pb-4">
+      <div className="mx-auto w-full max-w-[960px] px-1 pb-4">
         {!connected ? (
           <p className="mb-1 text-center text-[11px] text-[var(--muted-foreground)]">
             {t("Connecting…")}
