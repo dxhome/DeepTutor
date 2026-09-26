@@ -42,14 +42,16 @@ interface ComposerInputProps {
   knowledgeAvailable: boolean;
   /** Hide the Persona entry (main chat: persona has its own selector). */
   personaAvailable: boolean;
-  /**
-   * Connected subagents selectable via the ``@`` mention. When provided, ``@``
-   * opens an agent picker (the main-chat behavior) instead of the Space menu;
-   * surfaces that omit this (e.g. the quiz follow-up) keep the Space menu on @.
-   */
+  /** Concrete @ choices in the main chat; other surfaces keep the Space menu. */
   connectedAgents?: { name: string; kind?: string }[];
   selectedAgent?: string | null;
   onSelectAgent?: (name: string | null) => void;
+  mentionPersonas?: { name: string; description?: string }[];
+  selectedPersona?: string;
+  onSelectPersona?: (name: string) => void;
+  mentionPartners?: { id: string; name: string }[];
+  selectedPartner?: string | null;
+  onSelectPartner?: (id: string | null) => void;
   onSelectAttach: () => void;
   onSelectKnowledge?: () => void;
   onSelectNotebookPicker: () => void;
@@ -118,7 +120,7 @@ export function stripTrailingAtMention(value: string): string {
   return value.replace(/(^|\s)@[^\s]*$/, "$1").replace(/\s+$/, "");
 }
 
-/** The text typed after a trailing ``@`` (the agent-mention query), or "". */
+/** The text typed after a trailing ``@``, or "". */
 export function atMentionQuery(value: string, cursorPos: number): string {
   const match = /(^|\s)@([^\s]*)$/.exec(value.slice(0, cursorPos));
   return match ? match[2] : "";
@@ -161,6 +163,12 @@ export const ComposerInput = memo(
       connectedAgents = [],
       selectedAgent = null,
       onSelectAgent,
+      mentionPersonas = [],
+      selectedPersona = "",
+      onSelectPersona,
+      mentionPartners = [],
+      selectedPartner = null,
+      onSelectPartner,
       onSelectAttach,
       onSelectKnowledge,
       onSelectNotebookPicker,
@@ -194,8 +202,10 @@ export const ComposerInput = memo(
     const [showLanguagePopup, setShowLanguagePopup] = useState(false);
     const [activeLanguageIndex, setActiveLanguageIndex] = useState(0);
     const [atQuery, setAtQuery] = useState("");
+    const [activeAtIndex, setActiveAtIndex] = useState(0);
     const slashListId = useId();
     const languageListId = useId();
+    const mentionListId = useId();
     const availableSlashCommands = useMemo<SlashCommand[]>(() => [
       ...(onOpenPersonaSelector ? ["persona" as const] : []),
       ...(onReplyLanguageChange && !replyLanguageDisabled ? ["language" as const] : []),
@@ -207,18 +217,55 @@ export const ComposerInput = memo(
       },
       ...replyLanguageOptions,
     ], [replyLanguageDefaultLabel, replyLanguageOptions, t]);
-    // Main chat passes ``onSelectAgent`` → ``@`` picks a connected agent. Other
-    // surfaces (quiz follow-up) omit it and keep the @ Space menu.
-    const agentMentionMode = Boolean(onSelectAgent);
-    const filteredAgents = useMemo(
-      () =>
-        agentMentionMode
-          ? connectedAgents.filter((agent) =>
-              agent.name.toLowerCase().includes(atQuery.toLowerCase()),
-            )
-          : [],
-      [agentMentionMode, atQuery, connectedAgents],
-    );
+    // The main chat offers concrete styles, agents, and partners in groups.
+    // Other surfaces keep the Space menu on @.
+    const quickMentionMode = Boolean(onSelectAgent && onSelectPersona && onSelectPartner);
+    const mentionChoices = useMemo(() => {
+      if (!quickMentionMode) return [];
+      const query = atQuery.toLowerCase();
+      return [
+        ...[{ name: "", description: "" }, ...mentionPersonas].map((persona) => ({
+          kind: "persona" as const,
+          key: persona.name,
+          label: persona.name || t("Default"),
+          description: persona.description || "",
+          category: t("Response style"),
+          icon: UserRound,
+        })),
+        ...connectedAgents.map((agent) => ({
+          kind: "agent" as const,
+          key: agent.name,
+          label: agent.name,
+          description: "",
+          category: t("Connected agents"),
+          icon: agentGlyph(agent.kind) ?? Bot,
+        })),
+        ...mentionPartners.map((partner) => ({
+          kind: "partner" as const,
+          key: partner.id,
+          label: partner.name,
+          description: "",
+          category: t("Partners"),
+          icon: UserRound,
+        })),
+      ].filter((choice) =>
+        [choice.label, choice.category, choice.description]
+          .some((value) => value.toLowerCase().includes(query)),
+      );
+    }, [quickMentionMode, atQuery, connectedAgents, mentionPersonas, mentionPartners, t]);
+    const mentionGroups = useMemo(() => [
+      { kind: "persona", label: t("Response style") },
+      { kind: "agent", label: t("Connected agents") },
+      { kind: "partner", label: t("Partners") },
+    ].map((group) => ({
+      ...group,
+      choices: mentionChoices
+        .map((choice, index) => ({ choice, index }))
+        .filter(({ choice }) => choice.kind === group.kind),
+    })).filter((group) => group.choices.length > 0), [mentionChoices, t]);
+    useEffect(() => {
+      if (activeAtIndex >= mentionChoices.length) setActiveAtIndex(0);
+    }, [activeAtIndex, mentionChoices.length]);
 
     // Latest text mirrored into a ref by the change handlers (never updated
     // during render). The @space handlers and the imperative handle read
@@ -279,6 +326,7 @@ export const ComposerInput = memo(
         const atOpen = shouldOpenAtPopup(value, cursorPos);
         setShowAtPopup(atOpen);
         setAtQuery(atOpen ? atMentionQuery(value, cursorPos) : "");
+        setActiveAtIndex(0);
         updateSlashPopup(value, cursorPos);
       },
       [setInputBoth, onInputChange, updateSlashPopup],
@@ -291,6 +339,7 @@ export const ComposerInput = memo(
         const atOpen = shouldOpenAtPopup(target.value, cursorPos);
         setShowAtPopup(atOpen);
         setAtQuery(atOpen ? atMentionQuery(target.value, cursorPos) : "");
+        setActiveAtIndex(0);
         updateSlashPopup(target.value, cursorPos);
       },
       [updateSlashPopup],
@@ -335,20 +384,31 @@ export const ComposerInput = memo(
     }, [canSendEmpty, onSend, setInputBoth, onInputChange]);
 
     const clearTrailingMention = useCallback(() => {
-      const next = stripTrailingAtMention(inputRef.current);
+      const value = inputRef.current;
+      const cursor = textareaRef.current?.selectionStart ?? value.length;
+      const prefix = stripTrailingAtMention(value.slice(0, cursor));
+      const next = prefix + value.slice(cursor);
       setInputBoth(next);
       onInputChange(next);
-    }, [setInputBoth, onInputChange]);
+      requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+        textareaRef.current?.setSelectionRange(prefix.length, prefix.length);
+      });
+    }, [setInputBoth, onInputChange, textareaRef]);
 
-    const handleSelectAgentMention = useCallback(
-      (name: string) => {
-        clearTrailingMention();
-        setShowAtPopup(false);
-        setAtQuery("");
-        onSelectAgent?.(name);
-      },
-      [clearTrailingMention, onSelectAgent],
-    );
+    const handleSelectMentionChoice = useCallback((choice: (typeof mentionChoices)[number]) => {
+      clearTrailingMention();
+      setShowAtPopup(false);
+      setAtQuery("");
+      if (choice.kind === "agent") {
+        onSelectAgent?.(choice.key);
+      } else if (choice.kind === "persona") {
+        onSelectPersona?.(choice.key);
+      } else {
+        onSelectPartner?.(choice.key);
+      }
+      textareaRef.current?.focus();
+    }, [clearTrailingMention, onSelectAgent, onSelectPersona, onSelectPartner, textareaRef]);
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -391,16 +451,31 @@ export const ComposerInput = memo(
             return;
           }
         }
-        // With the agent-mention popup open, Enter/Tab confirm the first match.
+        // The main chat's @ menu selects a concrete style, agent, or partner.
         if (
           showAtPopup &&
-          agentMentionMode &&
-          filteredAgents.length > 0 &&
+          quickMentionMode &&
+          mentionChoices.length > 0 &&
           !isComposingRef.current &&
-          (e.key === "Enter" || e.key === "Tab")
+          (e.key === "ArrowDown" || e.key === "ArrowUp")
         ) {
           e.preventDefault();
-          handleSelectAgentMention(filteredAgents[0].name);
+          e.stopPropagation();
+          setActiveAtIndex((index) =>
+            (index + (e.key === "ArrowDown" ? 1 : -1) + mentionChoices.length) % mentionChoices.length,
+          );
+          return;
+        }
+        if (
+          showAtPopup &&
+          quickMentionMode &&
+          mentionChoices.length > 0 &&
+          !isComposingRef.current &&
+          (e.key === "Enter" || (e.key === "Tab" && !e.shiftKey))
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleSelectMentionChoice(mentionChoices[activeAtIndex] ?? mentionChoices[0]);
           return;
         }
         // Tab takes the offered question — but only into an empty composer, so
@@ -437,9 +512,10 @@ export const ComposerInput = memo(
         activeLanguageIndex,
         handleSelectReplyLanguage,
         showAtPopup,
-        agentMentionMode,
-        filteredAgents,
-        handleSelectAgentMention,
+        quickMentionMode,
+        mentionChoices,
+        activeAtIndex,
+        handleSelectMentionChoice,
         isComposingRef,
         onInputChange,
         placeholderCompletion,
@@ -495,9 +571,17 @@ export const ComposerInput = memo(
     // synthetic click on a sibling button (e.g. the Tools menu) can
     // re-open something else.
     const popupRef = useRef<HTMLDivElement>(null);
+    const mentionListRef = useRef<HTMLDivElement>(null);
     const slashPopupRef = useRef<HTMLDivElement>(null);
     const languagePopupRef = useRef<HTMLDivElement>(null);
     const languageListRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      if (!showAtPopup || !quickMentionMode) return;
+      const row = mentionListRef.current?.querySelector<HTMLElement>(`[data-mention-index="${activeAtIndex}"]`);
+      if (row && "scrollIntoView" in row) {
+        row.scrollIntoView({ block: "nearest" });
+      }
+    }, [showAtPopup, quickMentionMode, activeAtIndex]);
     useEffect(() => {
       if (!showLanguagePopup) return;
       const option = languageListRef.current?.children[activeLanguageIndex];
@@ -542,63 +626,76 @@ export const ComposerInput = memo(
 
     return (
       <div className="px-4 pt-3.5 pb-2">
-        {showAtPopup && agentMentionMode && (
+        {showAtPopup && quickMentionMode && (
           <div
             ref={popupRef}
             className="absolute bottom-full left-0 z-[70] mb-2"
           >
             <div
+              id={mentionListId}
               role="listbox"
-              aria-label={t("Talk to an agent")}
+              aria-label={t("Choose a style, agent, or partner")}
               className="w-[300px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--popover)] py-1 shadow-lg backdrop-blur-md"
             >
               <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-[0.05em] text-[var(--muted-foreground)]">
-                {t("Talk to an agent")}
+                {t("Choose a style, agent, or partner")}
               </div>
-              {filteredAgents.length === 0 ? (
+              {mentionChoices.length === 0 ? (
                 <div className="px-3 py-2 text-[12px] text-[var(--muted-foreground)]">
-                  {connectedAgents.length === 0
-                    ? t("No connected agents — connect one in My Agents.")
-                    : t("No matching agent")}
+                  {t("No matches")}
                 </div>
               ) : (
-                <div className="max-h-[260px] overflow-y-auto">
-                  {filteredAgents.map((agent) => {
-                    const Glyph = agentGlyph(agent.kind) ?? Bot;
-                    const active = selectedAgent === agent.name;
-                    return (
-                      <button
-                        key={agent.name}
-                        type="button"
-                        role="option"
-                        aria-selected={active}
-                        onClick={() => handleSelectAgentMention(agent.name)}
-                        className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left transition-colors active:bg-[var(--muted)]/70 ${
-                          active
-                            ? "bg-[var(--primary)]/[0.06]"
-                            : "hover:bg-[var(--muted)]/45"
-                        }`}
-                      >
-                        <Glyph size={15} className="shrink-0" />
-                        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--foreground)]">
-                          {agent.name}
-                        </span>
-                        {active && (
-                          <Check
-                            size={14}
-                            strokeWidth={2}
-                            className="shrink-0 text-[var(--primary)]"
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
+                <div ref={mentionListRef} className="max-h-[300px] overflow-y-auto py-1">
+                  {mentionGroups.map((group) => (
+                    <div key={group.kind} role="group" aria-label={group.label}>
+                      <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--muted-foreground)]">
+                        {group.label}
+                      </div>
+                      {group.choices.map(({ choice, index }) => {
+                        const Glyph = choice.icon;
+                        const selected =
+                          (choice.kind === "agent" && selectedAgent === choice.key) ||
+                          (choice.kind === "persona" && selectedPersona === choice.key) ||
+                          (choice.kind === "partner" && selectedPartner === choice.key);
+                        return (
+                          <button
+                            key={`${choice.kind}-${choice.key}`}
+                            id={`${mentionListId}-option-${index}`}
+                            data-mention-index={index}
+                            type="button"
+                            role="option"
+                            aria-selected={index === activeAtIndex}
+                            onPointerMove={() => setActiveAtIndex(index)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => handleSelectMentionChoice(choice)}
+                            className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors active:bg-[var(--muted)]/70 ${
+                              index === activeAtIndex
+                                ? "bg-[var(--primary)]/[0.08]"
+                                : "hover:bg-[var(--muted)]/45"
+                            }`}
+                          >
+                            <Glyph size={15} className="shrink-0" />
+                            <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--foreground)]">
+                              {choice.label}
+                            </span>
+                            {selected && (
+                              <Check
+                                size={14}
+                                strokeWidth={2}
+                                className="shrink-0 text-[var(--primary)]"
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
           </div>
         )}
-        {showAtPopup && !agentMentionMode && (
+        {showAtPopup && !quickMentionMode && (
           <div
             ref={popupRef}
             className="absolute bottom-full left-0 z-[70] mb-2"
@@ -726,13 +823,16 @@ export const ComposerInput = memo(
             maxLength={32000}
             suppressHydrationWarning
             placeholder={placeholderCompletion ? "" : basePlaceholder}
-            aria-haspopup={showSlashPopup || showLanguagePopup ? "listbox" : undefined}
-            aria-controls={showSlashPopup ? slashListId : showLanguagePopup ? languageListId : undefined}
-            aria-activedescendant={showSlashPopup
-              ? `${slashListId}-option-${activeSlashIndex}`
-              : showLanguagePopup
-                ? `${languageListId}-option-${activeLanguageIndex}`
-                : undefined}
+            aria-haspopup={(showAtPopup && quickMentionMode) || showSlashPopup || showLanguagePopup ? "listbox" : undefined}
+            aria-expanded={(showAtPopup && quickMentionMode) || showSlashPopup || showLanguagePopup}
+            aria-controls={showAtPopup && quickMentionMode ? mentionListId : showSlashPopup ? slashListId : showLanguagePopup ? languageListId : undefined}
+            aria-activedescendant={showAtPopup && quickMentionMode && mentionChoices.length > 0
+              ? `${mentionListId}-option-${activeAtIndex}`
+              : showSlashPopup
+                ? `${slashListId}-option-${activeSlashIndex}`
+                : showLanguagePopup
+                  ? `${languageListId}-option-${activeLanguageIndex}`
+                  : undefined}
             // The overlay below replaces the native placeholder visually
             // (so a long hint can truncate instead of wrapping), but an
             // empty placeholder would otherwise leave the field with no

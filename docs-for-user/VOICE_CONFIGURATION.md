@@ -2,6 +2,27 @@
 
 语音合成（TTS）和语音识别（STT）位于「设置 → 语音」；图像、视频生成位于「设置 → 多模态生成」。两者分别选择模型和默认配置。
 
+## 局域网设备上的语音输入
+
+浏览器只在可信的安全上下文中提供实时麦克风接口。另一台电脑或手机通过 `http://<局域网 IP>:3782` 访问时，即使浏览器支持录音，网页也无法调用麦克风。可以用音频文件入口选择已有录音；在支持 HTML 媒体采集的手机上，该入口也可调起系统录音。
+
+如需直接在网页里实时录音，先准备一个**访问设备信任**的 PEM 证书和私钥，证书的 SAN 必须包含访问时使用的域名或局域网 IP。没有现成证书时，可在 DeepTutor 服务器上生成本地 CA 和服务器证书：
+
+```powershell
+$serverAddress = "YOUR_LAN_IP_OR_DNS_NAME"
+deeptutor tls create --host $serverAddress
+```
+
+命令会在运行目录的 `data/user/tls/` 下生成 `rootCA.pem`、`deeptutor.pem` 和 `deeptutor-key.pem`；CA 签发私钥不会保存。**只把 `rootCA.pem` 安装到每台访问设备的受信任根证书列表；不要分发服务器私钥。** 根证书安装步骤因操作系统而异，安装后可能需要重启浏览器。服务器证书到期后需重新生成并在设备上信任新的根证书。然后启动 HTTPS 入口：
+
+```powershell
+deeptutor start --https-cert data/user/tls/deeptutor.pem --https-key data/user/tls/deeptutor-key.pem --https-host $serverAddress --https-port 3783 --no-browser
+```
+
+先把 `YOUR_LAN_IP_OR_DNS_NAME` 替换为这台服务器实际可访问的地址，然后在另一台设备打开 `https://<服务器地址>:3783`。证书与 `--https-host` 必须使用同一个地址；更换服务器地址后需要生成匹配新地址的证书。在服务器防火墙中放行 HTTPS 端口。证书颁发机构须在**每台访问设备**上被信任；仅在服务器上信任证书不够。不要通过忽略浏览器证书警告来使用麦克风。DeepTutor 不会自动安装信任根。
+
+HTTPS 入口会代理页面、API 和 WebSocket。启用时，原来的局域网 HTTP 地址（例如 `http://<服务器地址>:3782/chat`）会返回 308 重定向到 `--https-host` 指定的 HTTPS 地址，保留路径和查询参数；内部应用 HTTP 服务只监听本机回环地址。HTTP 重定向仅适用于浏览器请求，语音输入仍需先信任证书。`--detach` 也支持上述参数；停止服务仍使用 `deeptutor stop`。
+
 ## 火山引擎原生语音
 
 在语音页面新增 **Volcengine Speech (Doubao)** 服务商。这里使用火山语音控制台的凭据，与方舟 Ark 的模型 API Key 分开。

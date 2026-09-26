@@ -304,6 +304,8 @@ After `deeptutor start`, open the frontend URL printed in the terminal — by de
 
 **Browser microphone transcription:** OpenAI-compatible STT adapters forward browser audio to the provider without local conversion. The native DashScope and Volcengine STT adapters convert browser WebM/Opus to 16 kHz WAV and require an `ffmpeg` executable on DeepTutor's `PATH`. A canonical 16 kHz mono PCM WAV bypasses this conversion. For Windows PyPI installations using either native adapter, install FFmpeg, add its `bin` directory to the service's `PATH`, then restart DeepTutor. Conversion failures appear below the chat input.
 
+For microphone input from another device on your LAN, provide a certificate trusted by that device and start the optional HTTPS frontend with `--https-cert CERT.pem --https-key KEY.pem --https-host HOST --https-port 3783`. `deeptutor tls create --host HOST` can create a local CA and matching certificate; install only its `rootCA.pem` on client devices. Open `https://HOST:3783`; the configured HTTP frontend port redirects browser requests there, preserving paths and query strings. See [voice configuration](docs-for-user/VOICE_CONFIGURATION.md#局域网设备上的语音输入) for setup details.
+
 </details>
 
 <details>
@@ -955,8 +957,9 @@ The repo ships a root [`SKILL.md`](SKILL.md) — a ~200-line handover doc that t
 |:---|:---|
 | `deeptutor init` | Create or update `data/user/settings` in the current runtime home |
 | `deeptutor doctor [--online]` | Check whether the runtime is ready to start a session; `--online` also probes the configured model provider, `--format json` prints the report |
-| `deeptutor start [--home PATH] [--dev] [--detach] [--no-browser]` | Launch backend + frontend together; optionally detach or suppress browser opening |
+| `deeptutor start [--home PATH] [--dev] [--detach] [--no-browser] [--https-cert CERT] [--https-key KEY] [--https-host HOST] [--https-port PORT]` | Launch backend + frontend; optionally expose a trusted HTTPS frontend |
 | `deeptutor stop [--home PATH]` | Stop a launcher started with `--detach` |
+| `deeptutor tls create --host HOST [--out DIR]` | Create a local CA and HTTPS server certificate for a LAN hostname or IP |
 | `deeptutor serve [--port PORT]` | Start only the FastAPI backend |
 | `deeptutor workspace show/set/reset` | Inspect, select, or restore the per-user Content Workspace |
 | `deeptutor run <capability> <message>` | Run a single capability turn (`chat`, `ask_questions`, `deep_solve`, `deep_question`, `deep_research`, `visualize`, `math_animator`, `mastery_path`, `immersive_reading`, `course_study`, `immersive_watching`, `audio_overview`); add `--format json` for NDJSON output |
