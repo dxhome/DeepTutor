@@ -47,7 +47,7 @@ import type { SelectedHistorySession } from "@/components/chat/HistorySessionPic
 import type { SelectedQuestionEntry } from "@/components/chat/QuestionBankPicker";
 import type { SelectedRecord } from "@/lib/notebook-selection-types";
 import type { LLMSelection } from "@/features/chat/model/protocol";
-import type { LLMOption } from "@/lib/llm-options";
+import { llmSelectionKey, type LLMOption } from "@/lib/llm-options";
 import ChatSpaceMenu from "@/components/chat/space/ChatSpaceMenu";
 import type { SpaceMemoryFile } from "@/lib/space-items";
 import type { SelectedBookReference } from "@/lib/book-references";
@@ -1369,6 +1369,15 @@ export default memo(function ChatComposer({
                     onChange={onSelectLLM}
                     onRefresh={onRefreshLLMOptions}
                   />
+                )}
+                {!allowModelSelection && (
+                  <span
+                    role="status"
+                    className="max-w-[12rem] truncate rounded-lg bg-[var(--muted)]/60 px-2 py-1 text-[11px] text-[var(--muted-foreground)]"
+                    title={llmOptions.find(option => llmSelectionKey(option) === llmSelectionKey(llmSelection || activeLLMDefault))?.model || ""}
+                  >
+                    {t("Model")}: {llmOptions.find(option => llmSelectionKey(option) === llmSelectionKey(llmSelection || activeLLMDefault))?.model || (llmOptionsLoading ? t("Loading…") : t("No model configured"))}
+                  </span>
                 )}
 
                 {contextBudget ? <ContextBudgetChip budget={contextBudget} /> : null}

@@ -654,6 +654,7 @@ function PartnerDetail() {
             <PartnerChat
               partnerId={partnerId}
               partnerName={partner.name}
+              partnerModel={partner.model}
               emoji={partner.emoji}
               color={partner.color}
               avatar={partner.avatar}

@@ -67,6 +67,7 @@ async def test_provider_uses_deeptutor_token_service_and_raw_model_id(
 ) -> None:
     service = FakeCodexService()
     requests: list[tuple[str, dict[str, str], dict[str, Any]]] = []
+    request_timeouts: list[float] = []
 
     async def request(
         url: str,
@@ -75,6 +76,7 @@ async def test_provider_uses_deeptutor_token_service_and_raw_model_id(
         **_kwargs: Any,
     ) -> tuple[str, list[Any], str]:
         requests.append((url, headers, body))
+        request_timeouts.append(float(_kwargs.get("request_timeout", 60)))
         return "ok", [], "stop"
 
     monkeypatch.setattr(module, "get_codex_oauth_service", lambda: service)
@@ -93,6 +95,7 @@ async def test_provider_uses_deeptutor_token_service_and_raw_model_id(
         ],
         model=f"openai-codex/{model_slug}",
         reasoning_effort=reasoning_effort,
+        request_timeout=210,
         tools=[
             {
                 "type": "function",
@@ -115,6 +118,7 @@ async def test_provider_uses_deeptutor_token_service_and_raw_model_id(
     assert headers["chatgpt-account-id"] == "account-123"
     assert body["model"] == model_slug
     assert body["reasoning"] == {"effort": reasoning_effort}
+    assert request_timeouts == [210]
     assert body["tools"][0]["name"] == "lookup"
     assert body["input"] == [
         {

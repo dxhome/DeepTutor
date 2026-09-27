@@ -5941,6 +5941,127 @@ export interface paths {
     readonly patch?: never;
     readonly trace?: never;
   };
+  readonly "/api/question-notebook/practice/import/document/{token}": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** Get Import Document */
+    readonly get: operations["get_import_document_api_question_notebook_practice_import_document__token__get"];
+    readonly put?: never;
+    readonly post?: never;
+    /** Cancel Import Document */
+    readonly delete: operations["cancel_import_document_api_question_notebook_practice_import_document__token__delete"];
+    readonly options?: never;
+    readonly head?: never;
+    /** Update Import Document */
+    readonly patch: operations["update_import_document_api_question_notebook_practice_import_document__token__patch"];
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/{token}/retry": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /** Retry Import Document */
+    readonly post: operations["retry_import_document_api_question_notebook_practice_import_document__token__retry_post"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/{token}/source": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** Get Import Document Source */
+    readonly get: operations["get_import_document_source_api_question_notebook_practice_import_document__token__source_get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/jobs": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** List Import Document Jobs */
+    readonly get: operations["list_import_document_jobs_api_question_notebook_practice_import_document_jobs_get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/mode": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    /** Get Document Import Mode */
+    readonly get: operations["get_document_import_mode_api_question_notebook_practice_import_document_mode_get"];
+    readonly put?: never;
+    readonly post?: never;
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/preview": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /** Import Document Preview */
+    readonly post: operations["import_document_preview_api_question_notebook_practice_import_document_preview_post"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
+  readonly "/api/question-notebook/practice/import/document/start": {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: never;
+      readonly path?: never;
+      readonly cookie?: never;
+    };
+    readonly get?: never;
+    readonly put?: never;
+    /** Start Import Document */
+    readonly post: operations["start_import_document_api_question_notebook_practice_import_document_start_post"];
+    readonly delete?: never;
+    readonly options?: never;
+    readonly head?: never;
+    readonly patch?: never;
+    readonly trace?: never;
+  };
   readonly "/api/question-notebook/practice/import/preview": {
     readonly parameters: {
       readonly query?: never;
@@ -10687,6 +10808,22 @@ export interface components {
        */
       readonly search_mode: string;
     };
+    /** Body_import_document_preview_api_question_notebook_practice_import_document_preview_post */
+    readonly Body_import_document_preview_api_question_notebook_practice_import_document_preview_post: {
+      /**
+       * Course Id
+       * @default
+       */
+      readonly course_id: string;
+      /** File */
+      readonly file: string;
+      /**
+       * Target
+       * @default bank
+       * @enum {string}
+       */
+      readonly target: "bank" | "mistakes";
+    };
     /** Body_import_docx_api_documents_import_docx_post */
     readonly Body_import_docx_api_documents_import_docx_post: {
       /** File */
@@ -10760,6 +10897,22 @@ export interface components {
       readonly file: string;
       /** Language */
       readonly language?: string | null;
+    };
+    /** Body_start_import_document_api_question_notebook_practice_import_document_start_post */
+    readonly Body_start_import_document_api_question_notebook_practice_import_document_start_post: {
+      /**
+       * Course Id
+       * @default
+       */
+      readonly course_id: string;
+      /** File */
+      readonly file: string;
+      /**
+       * Target
+       * @default bank
+       * @enum {string}
+       */
+      readonly target: "bank" | "mistakes";
     };
     /** Body_upload_avatar_api_auth_profile_avatar_put */
     readonly Body_upload_avatar_api_auth_profile_avatar_put: {
@@ -11763,6 +11916,29 @@ export interface components {
       readonly api_base_url: string;
       /** Api Token */
       readonly api_token?: string | null;
+    };
+    /** DocumentDraftUpdate */
+    readonly DocumentDraftUpdate: {
+      /** Items */
+      readonly items: readonly {
+        readonly [key: string]: unknown;
+      }[];
+      /** Revision */
+      readonly revision: number;
+      /**
+       * Target
+       * @enum {string}
+       */
+      readonly target: "bank" | "mistakes";
+    };
+    /** DocumentImportMode */
+    readonly DocumentImportMode: {
+      /**
+       * Mode
+       * @default local_script
+       * @constant
+       */
+      readonly mode: "local_script";
     };
     /**
      * DocumentParsingInstall
@@ -16126,6 +16302,8 @@ export type SchemaBodyAdminImportUsersApiAuthUsersImportPost =
   components["schemas"]["Body_admin_import_users_api_auth_users_import_post"];
 export type SchemaBodyCreateKnowledgeBaseApiKnowledgeBasesPost =
   components["schemas"]["Body_create_knowledge_base_api_knowledge_bases_post"];
+export type SchemaBodyImportDocumentPreviewApiQuestionNotebookPracticeImportDocumentPreviewPost =
+  components["schemas"]["Body_import_document_preview_api_question_notebook_practice_import_document_preview_post"];
 export type SchemaBodyImportDocxApiDocumentsImportDocxPost =
   components["schemas"]["Body_import_docx_api_documents_import_docx_post"];
 export type SchemaBodyImportPreviewApiQuestionNotebookPracticeImportPreviewPost =
@@ -16139,6 +16317,8 @@ export type SchemaBodyReindexKnowledgeBaseApiKnowledgeBasesKbNameReindexPost =
   components["schemas"]["Body_reindex_knowledge_base_api_knowledge_bases__kb_name__reindex_post"];
 export type SchemaBodySpeechToTextApiVoiceSttPost =
   components["schemas"]["Body_speech_to_text_api_voice_stt_post"];
+export type SchemaBodyStartImportDocumentApiQuestionNotebookPracticeImportDocumentStartPost =
+  components["schemas"]["Body_start_import_document_api_question_notebook_practice_import_document_start_post"];
 export type SchemaBodyUploadAvatarApiAuthProfileAvatarPut =
   components["schemas"]["Body_upload_avatar_api_auth_profile_avatar_put"];
 export type SchemaBodyUploadFilesApiKnowledgeBasesKbNameUploadPost =
@@ -16259,6 +16439,10 @@ export type SchemaDeviceLoginRequest =
   components["schemas"]["DeviceLoginRequest"];
 export type SchemaDoclingRemoteTest =
   components["schemas"]["DoclingRemoteTest"];
+export type SchemaDocumentDraftUpdate =
+  components["schemas"]["DocumentDraftUpdate"];
+export type SchemaDocumentImportMode =
+  components["schemas"]["DocumentImportMode"];
 export type SchemaDocumentParsingInstall =
   components["schemas"]["DocumentParsingInstall"];
 export type SchemaDocumentParsingTest =
@@ -29869,6 +30053,327 @@ export interface operations {
     readonly requestBody: {
       readonly content: {
         readonly "application/json": components["schemas"]["CommitRequest"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly get_import_document_api_question_notebook_practice_import_document__token__get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly token: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly cancel_import_document_api_question_notebook_practice_import_document__token__delete: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly token: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly update_import_document_api_question_notebook_practice_import_document__token__patch: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly token: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "application/json": components["schemas"]["DocumentDraftUpdate"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly retry_import_document_api_question_notebook_practice_import_document__token__retry_post: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly token: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly get_import_document_source_api_question_notebook_practice_import_document__token__source_get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path: {
+        readonly token: string;
+      };
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly list_import_document_jobs_api_question_notebook_practice_import_document_jobs_get: {
+    readonly parameters: {
+      readonly query?: {
+        readonly course_id?: string;
+      };
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly get_document_import_mode_api_question_notebook_practice_import_document_mode_get: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody?: never;
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["DocumentImportMode"];
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly import_document_preview_api_question_notebook_practice_import_document_preview_post: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "multipart/form-data": components["schemas"]["Body_import_document_preview_api_question_notebook_practice_import_document_preview_post"];
+      };
+    };
+    readonly responses: {
+      /** @description Successful Response */
+      readonly 200: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      readonly 422: {
+        headers: {
+          readonly [name: string]: unknown;
+        };
+        content: {
+          readonly "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  readonly start_import_document_api_question_notebook_practice_import_document_start_post: {
+    readonly parameters: {
+      readonly query?: never;
+      readonly header?: {
+        readonly Authorization?: string | null;
+      };
+      readonly path?: never;
+      readonly cookie?: {
+        readonly dt_token?: string | null;
+      };
+    };
+    readonly requestBody: {
+      readonly content: {
+        readonly "multipart/form-data": components["schemas"]["Body_start_import_document_api_question_notebook_practice_import_document_start_post"];
       };
     };
     readonly responses: {

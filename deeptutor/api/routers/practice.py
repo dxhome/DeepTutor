@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import logging
 import time
-from typing import Literal
+import traceback
+from typing import Any, Literal
 import zipfile
+from pathlib import Path
 
 from defusedxml.ElementTree import ParseError
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
@@ -15,6 +18,9 @@ from pydantic import BaseModel, Field
 
 from deeptutor.services.practice.answers import check_answer
 from deeptutor.services.practice.importing import MAX_BYTES, preview
+from deeptutor.services.practice.document_import import (
+    DOCUMENT_EXTENSIONS, MAX_DOCUMENT_BYTES, parse_document,
+)
 from deeptutor.services.practice.scheduler import Rating, day_bounds
 from deeptutor.services.practice.storage import PracticeStore, ReviewConflict
 from deeptutor.services.session import get_sqlite_session_store
@@ -22,6 +28,10 @@ from deeptutor.services.session import get_sqlite_session_store
 from .question_notebook import NotebookEntryItem, _course_session_ids
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+_document_tasks: dict[str, asyncio.Task[None]] = {}
+DOCUMENT_JOB_TIMEOUT = 300
+_document_slots = asyncio.Semaphore(2)
 
 
 class PracticeSummary(BaseModel):
@@ -81,6 +91,16 @@ class ReviewRequest(AnswerRequest):
 
 class CommitRequest(BaseModel):
     token: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]+$")
+
+
+class DocumentDraftUpdate(BaseModel):
+    revision: int = Field(ge=0)
+    items: list[dict[str, Any]] = Field(max_length=500)
+    target: Literal["bank", "mistakes"]
+
+
+class DocumentImportMode(BaseModel):
+    mode: Literal["local_script"] = "local_script"
 
 
 def _validate_timezone(timezone: str) -> tuple[float, float]:
@@ -354,6 +374,197 @@ async def import_preview(
         "errors": parsed["errors"],
         "samples": parsed["questions"][:5],
     }
+
+
+@router.get("/import/document/mode", response_model=DocumentImportMode)
+async def get_document_import_mode():
+    return DocumentImportMode()
+
+
+@router.post("/import/document/preview")
+async def import_document_preview(
+    file: UploadFile = File(...),
+    target: Literal["bank", "mistakes"] = Form("bank"),
+    course_id: str = Form("", max_length=200),
+):
+    await _course_session_ids(get_sqlite_session_store(), course_id)
+    filename = Path(file.filename or "").name
+    if Path(filename).suffix.lower() not in DOCUMENT_EXTENSIONS:
+        raise HTTPException(422, "Supported documents: .pdf, .doc, .docx, .md and .txt")
+    try:
+        data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    finally:
+        await file.close()
+    if not data or len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(422, "Choose a non-empty document up to 10 MB")
+    try:
+        items = await parse_document(data, filename)
+    except (ValueError, UnicodeError, OSError, zipfile.BadZipFile) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Local document question extraction failed")
+        raise HTTPException(503, "Local document parsing failed; check the server log for details") from exc
+    media_type = "application/pdf" if filename.lower().endswith(".pdf") else (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        if filename.lower().endswith(".docx") else "application/octet-stream"
+    )
+    return await asyncio.to_thread(
+        _stage_document_preview, filename, target, items, data, media_type, course_id,
+    )
+
+
+def _stage_document_preview(
+    filename: str, target: str, items: list[dict], data: bytes,
+    media_type: str, course_id: str,
+) -> dict:
+    repo = PracticeStore(get_sqlite_session_store().db_path)
+    token = repo.stage_document(filename, target, items, data, media_type, course_id)
+    return repo.get_document(token)
+
+
+async def _run_document_import_job(
+    repo: PracticeStore, token: str, data: bytes, filename: str,
+) -> None:
+    try:
+        async def progress(event: dict) -> None:
+            await asyncio.to_thread(repo.set_document_progress, token, event)
+
+        async with _document_slots:
+            if not await asyncio.to_thread(repo.start_document_job, token):
+                return
+            items = await asyncio.wait_for(
+                parse_document(data, filename, progress=progress), timeout=DOCUMENT_JOB_TIMEOUT,
+            )
+            await asyncio.to_thread(repo.finish_document_job, token, items)
+    except asyncio.CancelledError:
+        await asyncio.to_thread(
+            repo.finish_document_job, token, [], "Parsing interrupted; retry this draft",
+        )
+        raise
+    except ValueError as exc:
+        detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        await asyncio.to_thread(repo.finish_document_job, token, [], detail)
+    except TimeoutError as exc:
+        detail = (
+            f"Document import exceeded the {DOCUMENT_JOB_TIMEOUT}s job timeout.\n"
+            + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        )
+        await asyncio.to_thread(
+            repo.finish_document_job, token, [],
+            detail,
+        )
+    except Exception as exc:
+        logger.exception("Background document question extraction failed")
+        detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        await asyncio.to_thread(
+            repo.finish_document_job, token, [], detail,
+        )
+    finally:
+        _document_tasks.pop(token, None)
+
+
+@router.post("/import/document/start")
+async def start_import_document(
+    file: UploadFile = File(...),
+    target: Literal["bank", "mistakes"] = Form("bank"),
+    course_id: str = Form("", max_length=200),
+):
+    await _course_session_ids(get_sqlite_session_store(), course_id)
+    filename = Path(file.filename or "").name
+    if Path(filename).suffix.lower() not in DOCUMENT_EXTENSIONS:
+        raise HTTPException(422, "Supported documents: .pdf, .doc, .docx, .md and .txt")
+    try:
+        data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    finally:
+        await file.close()
+    if not data or len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(422, "Choose a non-empty document up to 10 MB")
+    media_type = "application/pdf" if filename.lower().endswith(".pdf") else "application/octet-stream"
+    repo = PracticeStore(get_sqlite_session_store().db_path)
+    token = await asyncio.to_thread(
+        repo.stage_document_job, filename, target, data, media_type, course_id,
+    )
+    task = asyncio.create_task(_run_document_import_job(repo, token, data, filename))
+    _document_tasks[token] = task
+    return await asyncio.to_thread(repo.get_document, token)
+
+
+@router.get("/import/document/jobs")
+async def list_import_document_jobs(course_id: str = Query("", max_length=200)):
+    await _course_session_ids(get_sqlite_session_store(), course_id)
+    return await asyncio.to_thread(
+        PracticeStore(get_sqlite_session_store().db_path).list_document_jobs, course_id,
+    )
+
+
+@router.delete("/import/document/{token}")
+async def cancel_import_document(token: str):
+    repo = PracticeStore(get_sqlite_session_store().db_path)
+    try:
+        deleted_status = await asyncio.to_thread(repo.delete_document_job, token)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if deleted_status in {"queued", "processing"}:
+        task = _document_tasks.get(token)
+        if task:
+            task.cancel()
+    return {"status": "deleted"}
+
+
+@router.post("/import/document/{token}/retry")
+async def retry_import_document(token: str):
+    repo = PracticeStore(get_sqlite_session_store().db_path)
+    try:
+        filename, data = await asyncio.to_thread(repo.retry_document_job, token)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(410, str(exc)) from exc
+    task = asyncio.create_task(_run_document_import_job(repo, token, data, filename))
+    _document_tasks[token] = task
+    return await asyncio.to_thread(repo.get_document, token)
+
+
+@router.get("/import/document/{token}")
+async def get_import_document(token: str):
+    try:
+        return await asyncio.to_thread(
+            PracticeStore(get_sqlite_session_store().db_path).get_document, token,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(410, str(exc)) from exc
+
+
+@router.patch("/import/document/{token}")
+async def update_import_document(token: str, payload: DocumentDraftUpdate):
+    try:
+        return await asyncio.to_thread(
+            PracticeStore(get_sqlite_session_store().db_path).update_document,
+            token, payload.revision, payload.items, payload.target,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ReviewConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/import/document/{token}/source")
+async def get_import_document_source(token: str):
+    try:
+        media_type, source = await asyncio.to_thread(
+            PracticeStore(get_sqlite_session_store().db_path).document_source, token,
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return Response(source, media_type=media_type, headers={
+        "Content-Disposition": "inline", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.post("/import/commit")

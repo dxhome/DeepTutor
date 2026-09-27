@@ -207,6 +207,12 @@ def test_a_task_can_pin_its_own_model(tmp_path: Path) -> None:
     assert catalog["services"]["task"]["active_model_id"] == "task-model"
 
 
+def test_script_based_question_import_has_no_task_model_selector() -> None:
+    from deeptutor.services.model_selection.tasks import task_kind_payload
+
+    assert not any(item["id"] == "question_import" for item in task_kind_payload())
+
+
 def test_a_task_can_follow_the_chat_model_while_the_rest_do_not(tmp_path: Path) -> None:
     from deeptutor.services.model_selection.tasks import TaskKind, catalog_for_task
 

@@ -88,6 +88,7 @@ const GROUP_TEXT: Record<string, string> = {
   chat: "Conversation",
   mastery: "Mastery path",
   reading: "Immersive reading",
+  practice: "Practice",
 };
 
 type TaskChoice = NonNullable<RegistryEdit["task"]>;
@@ -186,7 +187,7 @@ export function TaskModelsWorkspace() {
     leading: { value: string; label: string },
     onPick: (value: string) => void,
   ) => {
-    const known = value === leading.value || rows.some((r) => r.key === value);
+    const known = value === leading.value || value === INHERIT || rows.some((r) => r.key === value);
     return (
       <select
         aria-label={label}
@@ -196,6 +197,7 @@ export function TaskModelsWorkspace() {
         onChange={(event) => onPick(event.target.value)}
       >
         <option value={leading.value}>{leading.label}</option>
+        {leading.value === GLOBAL && <option value={INHERIT}>{t("Follow the chat model")}</option>}
         {!known && (
           <option value={value} disabled>
             {t("Selected model is unavailable — choose another")}

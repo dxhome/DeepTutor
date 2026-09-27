@@ -16,12 +16,19 @@ vi.mock("@/lib/practice-api", async importOriginal => ({
   checkPracticeAnswer: vi.fn(),
   savePracticeReview: vi.fn(),
   previewPracticeImport: vi.fn(),
+  previewDocumentImport: vi.fn(),
+  getDocumentImport: vi.fn(),
+  getDocumentImportJobs: vi.fn(),
+  updateDocumentImport: vi.fn(),
   commitPracticeImport: vi.fn(),
   downloadPracticeTemplate: vi.fn(),
 }));
 initI18n("en");
 beforeEach(() => {
   vi.clearAllMocks();
+  HTMLElement.prototype.scrollTo = vi.fn();
+  window.localStorage.clear();
+  vi.mocked(api.getDocumentImportJobs).mockResolvedValue([]);
   vi.mocked(api.getPracticeQuestion).mockResolvedValue({
     entry: {
       id: 8,
@@ -58,6 +65,72 @@ beforeEach(() => {
     correct: true,
     rating: "good",
   });
+});
+
+it("reopens an active document import with its file count, progress, and logs", async () => {
+  const token = "c".repeat(32);
+  vi.mocked(api.getDocumentImportJobs).mockResolvedValue([{
+    token, filename: "xuhui.pdf", target: "bank", status: "processing",
+    stage: "visualizing", percent: 27, logs: ["Inspected page 2/10"],
+  }]);
+  vi.mocked(api.getDocumentImport).mockResolvedValue({
+    token, filename: "xuhui.pdf", target: "bank", revision: 0, items: [],
+    status: "processing", stage: "visualizing", percent: 27,
+    logs: ["Inspected page 2/10"],
+  });
+  render(<PracticeImport onClose={vi.fn()} onImported={vi.fn()} initialTarget="bank" />);
+  expect(await screen.findByText(/Question import tasks/)).toHaveTextContent("Files: 1");
+  expect(screen.getByRole("progressbar", { name: "Question import progress" })).toHaveAttribute("aria-valuenow", "27");
+  expect(screen.getByText(/Inspected page 2\/10/)).toBeInTheDocument();
+});
+
+it("starts each selected exam file and shows the batch file count", async () => {
+  vi.mocked(api.previewDocumentImport).mockImplementation(async file => ({
+    token: file.name === "a.md" ? "a".repeat(32) : "b".repeat(32),
+    filename: file.name, target: "bank", revision: 0, items: [],
+    status: "queued", stage: "queued", percent: 0, logs: [`Queued ${file.name}`],
+  }));
+  vi.mocked(api.getDocumentImportJobs)
+    .mockResolvedValueOnce([])
+    .mockResolvedValue([
+      { token: "a".repeat(32), filename: "a.md", target: "bank", status: "queued", stage: "queued", percent: 0 },
+      { token: "b".repeat(32), filename: "b.md", target: "bank", status: "queued", stage: "queued", percent: 0 },
+    ]);
+  render(<PracticeImport onClose={vi.fn()} onImported={vi.fn()} initialTarget="bank" />);
+  fireEvent.change(screen.getByLabelText(/Choose a question file/), {
+    target: { files: [new File(["A"], "a.md"), new File(["B"], "b.md")] },
+  });
+  await waitFor(() => expect(api.previewDocumentImport).toHaveBeenCalledTimes(2));
+  expect(await screen.findByText(/Question import tasks/)).toHaveTextContent("Files: 2");
+});
+
+it("reviews and corrects a document question before committing", async () => {
+  vi.mocked(api.previewDocumentImport).mockResolvedValue({
+    token: "b".repeat(32), filename: "exam.md", target: "bank", revision: 0,
+    items: [{
+      id: "1", number: "1", page: 1, source_excerpt: "1. Compute 2+2",
+      question: "Compute 2+2", question_type: "fill_blank", options: {},
+      correct_answer: "", explanation: "", tags: [],
+      warnings: ["Missing answer in source"], errors: ["Question and correct answer are required"],
+      selected: true, confirmed: false,
+    }],
+  });
+  vi.mocked(api.updateDocumentImport).mockImplementation(async draft => ({ ...draft, revision: draft.revision + 1 }));
+  vi.mocked(api.commitPracticeImport).mockResolvedValue({ created: 1, duplicates: 0 });
+  const imported = vi.fn();
+  render(<PracticeImport onClose={vi.fn()} onImported={imported} initialTarget="bank" />);
+  fireEvent.change(screen.getByLabelText(/Choose a question file/), {
+    target: { files: [new File(["1. Compute 2+2"], "exam.md")] },
+  });
+  const confirm = await screen.findByRole("button", { name: /Confirm import/ });
+  expect(confirm).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Question 1" }));
+  fireEvent.change(screen.getByLabelText("Correct answer"), { target: { value: "4" } });
+  fireEvent.click(screen.getByLabelText("I checked this question against the source"));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(imported).toHaveBeenCalledOnce());
+  expect(api.updateDocumentImport).toHaveBeenCalled();
+  expect(api.commitPracticeImport).toHaveBeenCalledWith("b".repeat(32));
 });
 
 it("hides reference answers, waits for the server, and only counts saved reviews", async () => {

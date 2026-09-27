@@ -51,6 +51,38 @@ export interface ImportPreview {
   errors: { row: number; message: string }[]
   samples: { question: string; question_type: string; correct_answer: string; tags: string[] }[]
 }
+export interface DocumentImportItem {
+  id: string
+  number: string
+  page: number | null
+  source_excerpt: string
+  question: string
+  question_type: string
+  options: Record<string, string>
+  correct_answer: string
+  explanation: string
+  tags: string[]
+  warnings: string[]
+  confidence?: number
+  confidence_reasons?: string[]
+  errors: string[]
+  selected: boolean
+  confirmed: boolean
+  duplicate?: boolean
+}
+export interface DocumentImportDraft {
+  token: string
+  filename: string
+  target: 'bank' | 'mistakes'
+  revision: number
+  items: DocumentImportItem[]
+  status?: 'queued' | 'processing' | 'ready' | 'failed' | 'cancelled'
+  error?: string
+  stage?: 'queued' | 'reading' | 'visualizing' | 'extracting_questions' | 'matching_answers' | 'reasoning' | 'preview' | 'validating' | 'ready'
+  percent?: number
+  logs?: string[]
+}
+export type DocumentImportJob = Pick<DocumentImportDraft, 'token' | 'filename' | 'target' | 'status' | 'error' | 'stage' | 'percent' | 'logs'>
 export class PracticeRequestError extends Error {
   constructor(
     message: string,
@@ -123,6 +155,31 @@ export function previewPracticeImport(file: File, target: 'bank' | 'mistakes', c
   data.append('course_id', courseId)
   return request<ImportPreview>('/import/preview', { method: 'POST', body: data })
 }
+export function previewDocumentImport(file: File, target: 'bank' | 'mistakes', courseId = '') {
+  const data = new FormData()
+  data.append('file', file)
+  data.append('target', target)
+  data.append('course_id', courseId)
+  return request<DocumentImportDraft>('/import/document/start', { method: 'POST', body: data })
+}
+export const getDocumentImportMode = () =>
+  request<{ mode: string }>('/import/document/mode')
+export const getDocumentImport = (token: string) =>
+  request<DocumentImportDraft>(`/import/document/${token}`)
+export const getDocumentImportJobs = (courseId = '') =>
+  request<DocumentImportJob[]>(`/import/document/jobs?course_id=${encodeURIComponent(courseId)}`)
+export const cancelDocumentImport = (token: string) =>
+  request<{ status: string }>(`/import/document/${token}`, { method: 'DELETE' })
+export const retryDocumentImport = (token: string) =>
+  request<DocumentImportDraft>(`/import/document/${token}/retry`, { method: 'POST' })
+export const updateDocumentImport = (draft: DocumentImportDraft) =>
+  request<DocumentImportDraft>(`/import/document/${draft.token}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revision: draft.revision, items: draft.items, target: draft.target }),
+  })
+export const documentImportSourceUrl = (token: string) =>
+  apiUrl(`${ROOT}/import/document/${token}/source`)
 export const commitPracticeImport = (token: string) =>
   request<{ created: number; duplicates: number }>('/import/commit', json({ token }))
 export async function downloadPracticeTemplate(format: 'csv' | 'xlsx') {

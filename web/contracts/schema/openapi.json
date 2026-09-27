@@ -772,6 +772,35 @@
         "title": "Body_create_knowledge_base_api_knowledge_bases_post",
         "type": "object"
       },
+      "Body_import_document_preview_api_question_notebook_practice_import_document_preview_post": {
+        "properties": {
+          "course_id": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Course Id",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "target": {
+            "default": "bank",
+            "enum": [
+              "bank",
+              "mistakes"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_document_preview_api_question_notebook_practice_import_document_preview_post",
+        "type": "object"
+      },
       "Body_import_docx_api_documents_import_docx_post": {
         "properties": {
           "file": {
@@ -913,6 +942,35 @@
           "file"
         ],
         "title": "Body_speech_to_text_api_voice_stt_post",
+        "type": "object"
+      },
+      "Body_start_import_document_api_question_notebook_practice_import_document_start_post": {
+        "properties": {
+          "course_id": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Course Id",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "target": {
+            "default": "bank",
+            "enum": [
+              "bank",
+              "mistakes"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_start_import_document_api_question_notebook_practice_import_document_start_post",
         "type": "object"
       },
       "Body_upload_avatar_api_auth_profile_avatar_put": {
@@ -3101,6 +3159,51 @@
           }
         },
         "title": "DoclingRemoteTest",
+        "type": "object"
+      },
+      "DocumentDraftUpdate": {
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 500,
+            "title": "Items",
+            "type": "array"
+          },
+          "revision": {
+            "minimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "target": {
+            "enum": [
+              "bank",
+              "mistakes"
+            ],
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "items",
+          "target"
+        ],
+        "title": "DocumentDraftUpdate",
+        "type": "object"
+      },
+      "DocumentImportMode": {
+        "properties": {
+          "mode": {
+            "const": "local_script",
+            "default": "local_script",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "DocumentImportMode",
         "type": "object"
       },
       "DocumentParsingInstall": {
@@ -40307,6 +40410,657 @@
           }
         },
         "summary": "Import Commit",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/jobs": {
+      "get": {
+        "operationId": "list_import_document_jobs_api_question_notebook_practice_import_document_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "course_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Course Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Document Jobs",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/mode": {
+      "get": {
+        "operationId": "get_document_import_mode_api_question_notebook_practice_import_document_mode_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentImportMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Document Import Mode",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/preview": {
+      "post": {
+        "operationId": "import_document_preview_api_question_notebook_practice_import_document_preview_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_document_preview_api_question_notebook_practice_import_document_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Document Preview",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/start": {
+      "post": {
+        "operationId": "start_import_document_api_question_notebook_practice_import_document_start_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_start_import_document_api_question_notebook_practice_import_document_start_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Import Document",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/{token}": {
+      "delete": {
+        "operationId": "cancel_import_document_api_question_notebook_practice_import_document__token__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Import Document",
+        "tags": [
+          "practice"
+        ]
+      },
+      "get": {
+        "operationId": "get_import_document_api_question_notebook_practice_import_document__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Document",
+        "tags": [
+          "practice"
+        ]
+      },
+      "patch": {
+        "operationId": "update_import_document_api_question_notebook_practice_import_document__token__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentDraftUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Import Document",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/{token}/retry": {
+      "post": {
+        "operationId": "retry_import_document_api_question_notebook_practice_import_document__token__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Import Document",
+        "tags": [
+          "practice"
+        ]
+      }
+    },
+    "/api/question-notebook/practice/import/document/{token}/source": {
+      "get": {
+        "operationId": "get_import_document_source_api_question_notebook_practice_import_document__token__source_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "dt_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dt Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Document Source",
         "tags": [
           "practice"
         ]

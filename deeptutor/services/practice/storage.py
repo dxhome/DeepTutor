@@ -58,6 +58,17 @@ def initialize_practice(conn: sqlite3.Connection) -> None:
             created_at REAL NOT NULL,
             result_json TEXT
         );
+        CREATE TABLE IF NOT EXISTS practice_import_sources (
+            token TEXT PRIMARY KEY REFERENCES practice_imports(token) ON DELETE CASCADE,
+            media_type TEXT NOT NULL,
+            source_bytes BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS practice_import_jobs (
+            token TEXT PRIMARY KEY REFERENCES practice_imports(token) ON DELETE CASCADE,
+            status TEXT NOT NULL,
+            error TEXT NOT NULL DEFAULT '',
+            updated_at REAL NOT NULL
+        );
         CREATE TRIGGER IF NOT EXISTS practice_capture_insert
         AFTER INSERT ON notebook_entries
         WHEN NEW.is_correct = 0 AND COALESCE(NEW.result, '') != 'ungraded'
@@ -345,6 +356,328 @@ class PracticeStore:
             )
         return token
 
+    def stage_document(
+        self, filename: str, target: str, items: list[dict], source: bytes,
+        media_type: str, course_id: str = "",
+    ) -> str:
+        token, now = uuid.uuid4().hex, time.time()
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM practice_imports WHERE created_at < ? AND result_json IS NULL",
+                (now - DAY,),
+            )
+            conn.execute(
+                "INSERT INTO practice_imports VALUES(?, ?, ?, ?, ?, NULL)",
+                (token, filename[:200], target, json.dumps(
+                    {"items": items, "course_id": course_id, "revision": 0}, ensure_ascii=False
+                ), now),
+            )
+            conn.execute(
+                "INSERT INTO practice_import_sources VALUES(?, ?, ?)",
+                (token, media_type, source),
+            )
+        return token
+
+    def stage_document_job(
+        self, filename: str, target: str, source: bytes,
+        media_type: str, course_id: str = "",
+    ) -> str:
+        token = self.stage_document(filename, target, [], source, media_type, course_id)
+        self.set_initial_document_progress(token, filename)
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO practice_import_jobs VALUES(?, 'queued', '', ?)",
+                (token, time.time()),
+            )
+        return token
+
+    def start_document_job(self, token: str) -> bool:
+        with self.connect() as conn:
+            updated = conn.execute(
+                "UPDATE practice_import_jobs SET status='processing', updated_at=? "
+                "WHERE token=? AND status='queued'", (time.time(), token),
+            )
+            return bool(updated.rowcount)
+
+    def set_initial_document_progress(self, token: str, filename: str) -> None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT payload_json FROM practice_imports WHERE token=?", (token,)).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload.update({"stage": "queued", "percent": 0, "logs": [f"Queued {filename}"]})
+            conn.execute("UPDATE practice_imports SET payload_json=? WHERE token=?",
+                         (json.dumps(payload, ensure_ascii=False), token))
+
+    def set_document_progress(self, token: str, event: dict) -> None:
+        with self.connect() as conn:
+            job = conn.execute(
+                "SELECT status FROM practice_import_jobs WHERE token=?", (token,)
+            ).fetchone()
+            if not job or job["status"] != "processing":
+                return
+            row = conn.execute(
+                "SELECT payload_json FROM practice_imports WHERE token=?", (token,)
+            ).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["stage"] = str(event.get("stage") or payload.get("stage") or "reading")
+            payload["percent"] = max(0, min(99, int(event.get("percent", payload.get("percent", 0)))))
+            message = str(event.get("message") or "")
+            if message:
+                payload["logs"] = (payload.get("logs", []) + [message])[-100:]
+            conn.execute(
+                "UPDATE practice_imports SET payload_json=? WHERE token=?",
+                (json.dumps(payload, ensure_ascii=False), token),
+            )
+            conn.execute("UPDATE practice_import_jobs SET updated_at=? WHERE token=?",
+                         (time.time(), token))
+
+    def finish_document_job(self, token: str, items: list[dict], error: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            job = conn.execute(
+                "SELECT status FROM practice_import_jobs WHERE token=?", (token,)
+            ).fetchone()
+            if not job or job["status"] == "cancelled":
+                return
+            if error:
+                row = conn.execute("SELECT payload_json FROM practice_imports WHERE token=?", (token,)).fetchone()
+                payload = json.loads(row["payload_json"])
+                payload["logs"] = (payload.get("logs", []) + [f"Failed: {error}"])[-100:]
+                conn.execute("UPDATE practice_imports SET payload_json=? WHERE token=?",
+                             (json.dumps(payload, ensure_ascii=False), token))
+                conn.execute(
+                    "UPDATE practice_import_jobs SET status='failed', error=?, updated_at=? WHERE token=?",
+                    (error, time.time(), token),
+                )
+                return
+            row = conn.execute("SELECT payload_json FROM practice_imports WHERE token=?", (token,)).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["items"] = items
+            payload["percent"] = 100
+            payload["stage"] = "ready"
+            payload["logs"] = (payload.get("logs", []) + [f"预览生成完成：共 {len(items)} 道候选题"])[-100:]
+            conn.execute(
+                "UPDATE practice_imports SET payload_json=? WHERE token=?",
+                (json.dumps(payload, ensure_ascii=False), token),
+            )
+            conn.execute(
+                "UPDATE practice_import_jobs SET status='ready', updated_at=? WHERE token=?",
+                (time.time(), token),
+            )
+
+    def cancel_document_job(self, token: str) -> None:
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            updated = conn.execute(
+                "UPDATE practice_import_jobs SET status='cancelled', updated_at=? "
+                "WHERE token=? AND status IN ('processing', 'queued')",
+                (time.time(), token),
+            )
+            if not updated.rowcount:
+                raise LookupError("Processing import not found")
+            row = conn.execute("SELECT payload_json FROM practice_imports WHERE token=?", (token,)).fetchone()
+            payload = json.loads(row["payload_json"])
+            payload["logs"] = (payload.get("logs", []) + ["Parsing cancelled"])[-100:]
+            conn.execute("UPDATE practice_imports SET payload_json=? WHERE token=?",
+                         (json.dumps(payload, ensure_ascii=False), token))
+
+    def delete_document_job(self, token: str) -> str:
+        """Delete an uncommitted document-import task and its source file."""
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            job = conn.execute(
+                "SELECT status FROM practice_import_jobs WHERE token=?", (token,)
+            ).fetchone()
+            if not job:
+                raise LookupError("Import task not found")
+            staged = conn.execute(
+                "SELECT result_json FROM practice_imports WHERE token=?", (token,)
+            ).fetchone()
+            if not staged or staged["result_json"]:
+                raise ValueError("This import has already been committed")
+            conn.execute("DELETE FROM practice_import_sources WHERE token=?", (token,))
+            conn.execute("DELETE FROM practice_import_jobs WHERE token=?", (token,))
+            conn.execute("DELETE FROM practice_imports WHERE token=? AND result_json IS NULL", (token,))
+            return str(job["status"])
+
+    def retry_document_job(self, token: str) -> tuple[str, bytes]:
+        with self.connect() as conn:
+            updated = conn.execute(
+                "UPDATE practice_import_jobs SET status='queued', error='', updated_at=? "
+                "WHERE token=? AND status='failed'",
+                (time.time(), token),
+            )
+            if not updated.rowcount:
+                raise LookupError("Failed import draft not found")
+            row = conn.execute(
+                "SELECT filename, payload_json FROM practice_imports WHERE token=? AND created_at>?",
+                (token, time.time() - DAY),
+            ).fetchone()
+            if not row:
+                raise ValueError("Import draft expired")
+            payload = json.loads(row["payload_json"])
+            payload["stage"] = "queued"
+            payload["percent"] = 0
+            payload["logs"] = (payload.get("logs", []) + ["Retry queued"])[-100:]
+            conn.execute(
+                "UPDATE practice_imports SET payload_json=? WHERE token=?",
+                (json.dumps(payload, ensure_ascii=False), token),
+            )
+        _, source = self.document_source(token)
+        return row["filename"], source
+
+    def get_document(self, token: str) -> dict:
+        self.fail_stalled_document_jobs()
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM practice_imports WHERE token=?", (token,)).fetchone()
+            job = conn.execute("SELECT status, error FROM practice_import_jobs WHERE token=?", (token,)).fetchone()
+        if not row:
+            raise LookupError("Import draft not found")
+        if time.time() - row["created_at"] > DAY:
+            raise ValueError("Import draft expired")
+        payload = json.loads(row["payload_json"])
+        if row["result_json"] or not isinstance(payload, dict) or "items" not in payload:
+            raise ValueError("Import draft is no longer editable")
+        return {
+            "token": token, "filename": row["filename"], "target": row["target"],
+            "items": self._annotate_duplicates(payload["items"]), "revision": payload["revision"],
+            "status": job["status"] if job else "ready",
+            "error": job["error"] if job else "",
+            "stage": payload.get("stage", "reading"),
+            "percent": payload.get("percent", 100 if not job else 0),
+            "logs": payload.get("logs", []),
+        }
+
+    def fail_stalled_document_jobs(self) -> None:
+        now = time.time()
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE practice_import_jobs SET status='failed', error=?, updated_at=? "
+                "WHERE status='processing' AND updated_at<?",
+                ("Parsing stopped before completion; retry this draft", now, now - 360),
+            )
+            conn.execute(
+                "UPDATE practice_import_jobs SET status='failed', error=?, updated_at=? "
+                "WHERE status='queued' AND updated_at<?",
+                ("Parsing queue stopped before this file started; retry this draft", now, now - 1800),
+            )
+
+    def list_document_jobs(self, course_id: str = "") -> list[dict]:
+        self.fail_stalled_document_jobs()
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT i.token, i.filename, i.target, i.payload_json, j.status, j.error "
+                "FROM practice_imports i JOIN practice_import_jobs j ON j.token=i.token "
+                "WHERE i.result_json IS NULL AND i.created_at>? "
+                "ORDER BY i.created_at DESC LIMIT 50", (time.time() - DAY,),
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if payload.get("course_id", "") != course_id:
+                continue
+            result.append({
+                "token": row["token"], "filename": row["filename"], "target": row["target"],
+                "status": row["status"], "error": row["error"],
+                "stage": payload.get("stage", "queued"), "percent": payload.get("percent", 0),
+                "logs": payload.get("logs", []),
+            })
+        return result
+
+    def _annotate_duplicates(self, items: list[dict]) -> list[dict]:
+        from .importing import normalize_question
+
+        with self.connect() as conn:
+            result = []
+            seen: set[str] = set()
+            for item in items:
+                duplicate = False
+                try:
+                    question_id = normalize_question(item)["question_id"]
+                    duplicate = question_id in seen or bool(conn.execute(
+                        "SELECT 1 FROM notebook_entries WHERE origin_type='external_import' "
+                        "AND origin_ref='practice-import' AND question_id=? AND turn_id=''",
+                        (question_id,),
+                    ).fetchone())
+                    if item.get("selected"):
+                        seen.add(question_id)
+                except (ValueError, TypeError, KeyError):
+                    pass
+                result.append({**item, "duplicate": duplicate})
+            return result
+
+    def document_source(self, token: str) -> tuple[str, bytes]:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT s.media_type, s.source_bytes FROM practice_import_sources s "
+                "JOIN practice_imports i ON i.token=s.token WHERE s.token=? "
+                "AND (i.created_at>? OR i.result_json IS NOT NULL)",
+                (token, time.time() - DAY),
+            ).fetchone()
+        if not row:
+            raise LookupError("Document source not found")
+        return row["media_type"], row["source_bytes"]
+
+    def update_document(
+        self, token: str, revision: int, items: list[dict], target: str | None = None,
+    ) -> dict:
+        from .document_import import validate_candidate
+        from .importing import MAX_ROWS
+
+        if len(items) > MAX_ROWS:
+            raise ValueError("Too many questions")
+        if len({str(item.get("id")) for item in items if isinstance(item, dict)}) != len(items):
+            raise ValueError("Question draft IDs must be unique")
+        cleaned = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("Invalid question draft")
+            candidate = {
+                key: item.get(key) for key in (
+                    "id", "number", "page", "source_excerpt", "question", "question_type",
+                    "options", "correct_answer", "explanation", "tags", "warnings", "confidence",
+                    "confidence_reasons", "selected", "confirmed",
+                )
+            }
+            candidate["selected"] = bool(candidate["selected"])
+            candidate["confirmed"] = bool(candidate["confirmed"])
+            candidate["errors"] = validate_candidate(candidate)
+            cleaned.append(candidate)
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM practice_imports WHERE token=?", (token,)).fetchone()
+            if not row:
+                raise LookupError("Import draft not found")
+            if row["result_json"] or time.time() - row["created_at"] > DAY:
+                raise ValueError("Import draft expired or already committed")
+            job = conn.execute(
+                "SELECT status FROM practice_import_jobs WHERE token=?", (token,)
+            ).fetchone()
+            if job and job["status"] != "ready":
+                raise ValueError("Document extraction is not ready")
+            payload = json.loads(row["payload_json"])
+            if not isinstance(payload, dict) or "items" not in payload:
+                raise ValueError("This import cannot be edited")
+            if payload["revision"] != revision:
+                raise ReviewConflict("Import draft changed in another tab; reload it")
+            if target is not None and target not in ("bank", "mistakes"):
+                raise ValueError("Choose a valid import target")
+            originals = {str(item.get("id")): item for item in payload["items"]}
+            for candidate in cleaned:
+                original = originals.get(str(candidate["id"]))
+                if original:
+                    for field in ("page", "source_excerpt", "warnings", "confidence", "confidence_reasons"):
+                        candidate[field] = original.get(field)
+                else:
+                    candidate["source_excerpt"] = str(candidate.get("source_excerpt") or "")[:2000]
+                    candidate["warnings"] = []
+            payload["items"] = cleaned
+            payload["revision"] += 1
+            conn.execute(
+                "UPDATE practice_imports SET payload_json=?, target=? WHERE token=?",
+                (json.dumps(payload, ensure_ascii=False), target or row["target"], token),
+            )
+        return self.get_document(token)
+
     def commit_import(self, token: str) -> dict:
         now = time.time()
         with self.connect() as conn:
@@ -358,8 +691,30 @@ class PracticeStore:
                 return json.loads(staged["result_json"])
             if now - staged["created_at"] > DAY:
                 raise ValueError("Import preview expired. Select the file again.")
+            job = conn.execute(
+                "SELECT status FROM practice_import_jobs WHERE token=?", (token,)
+            ).fetchone()
+            if job and job["status"] != "ready":
+                raise ValueError("Document extraction is not ready")
             payload = json.loads(staged["payload_json"])
-            questions = payload if isinstance(payload, list) else payload["questions"]
+            if isinstance(payload, dict) and "items" in payload:
+                selected = [item for item in payload["items"] if item.get("selected")]
+                if not selected:
+                    raise ValueError("Select at least one question")
+                from .document_import import validate_candidate
+                from .importing import normalize_question
+
+                for item in selected:
+                    if validate_candidate(item):
+                        raise ValueError("Fix selected questions before importing")
+                    if item.get("warnings") and not item.get("confirmed"):
+                        raise ValueError("Confirm every selected question with a warning")
+                questions = [
+                    {**normalize_question(item), "page": item.get("page"), "number": item.get("number")}
+                    for item in selected
+                ]
+            else:
+                questions = payload if isinstance(payload, list) else payload["questions"]
             # All practice-file imports share one durable origin namespace.
             # ``question_id`` is a content hash, so re-importing the same
             # question remains idempotent without tying ownership to an
@@ -372,8 +727,9 @@ class PracticeStore:
                     INSERT OR IGNORE INTO notebook_entries(
                         session_id, origin_type, origin_ref, question_id, question, question_type,
                         options_json, correct_answer, explanation, difficulty, user_answer, source,
-                        result, assessment_type, created_at, updated_at, material_title, material_id)
-                    VALUES(NULL, 'external_import', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?, 'quiz', ?, ?, ?, ?)
+                        result, assessment_type, created_at, updated_at, material_title, material_id,
+                        section_id, section_title)
+                    VALUES(NULL, 'external_import', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?, 'quiz', ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         origin_ref,
@@ -390,6 +746,9 @@ class PracticeStore:
                         now,
                         staged["filename"],
                         "import:" + token,
+                        f"page:{question['page']}" if question.get("page") else "",
+                        f"Question {question.get('number', '')}, page {question['page']}"
+                        if question.get("page") else "",
                     ),
                 )
                 created += cursor.rowcount

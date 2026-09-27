@@ -19,6 +19,7 @@ import { bookRoute, masterySessionRoute } from "@/lib/learning-routes";
 import CategoryMenu from "./CategoryMenu";
 import { practiceMarkdown } from "@/lib/practice-content";
 import Tooltip from "@/shared/ui/Tooltip";
+import { documentImportSourceUrl } from "@/lib/practice-api";
 
 const SOURCE_LABELS: Record<NotebookEntry["source"], string> = {
   deep_question: "Deep Question",
@@ -506,6 +507,14 @@ export default function QuestionCard({
               <span className="inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--muted)]/40 px-2 py-0.5 text-[var(--muted-foreground)]">
                 {independentProvenance}
               </span>
+            )}
+            {entry.source === "import" && entry.material_id.startsWith("import:") &&
+              /\.(pdf|doc|docx|md|txt)$/i.test(entry.material_title) && (
+              <a href={`${documentImportSourceUrl(entry.material_id.slice(7))}${entry.section_id.startsWith("page:") ? `#page=${entry.section_id.slice(5)}` : ""}`}
+                target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] px-2 py-0.5 text-[var(--muted-foreground)]">
+                <ExternalLink size={10} />{t(entry.material_title.toLowerCase().endsWith(".pdf") ? "View source PDF" : "View source file")}
+              </a>
             )}
             {entry.source === "book" && entry.material_id && (
               <Link

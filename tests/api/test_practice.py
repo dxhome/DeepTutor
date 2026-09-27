@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import io
 import json
 import sqlite3
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -49,6 +50,13 @@ def seed(store, **changes):
         return await store.find_notebook_entry("lesson", item["question_id"])
 
     return asyncio.run(run())
+
+
+def test_document_import_mode_endpoint_reports_local_script(bank):
+    _, _, client = bank
+    response = client.get("/practice/import/document/mode")
+    assert response.status_code == 200
+    assert response.json() == {"mode": "local_script"}
 
 
 @pytest.mark.parametrize("source", sorted(ASSESSMENT_SOURCES))
@@ -298,6 +306,332 @@ def test_malformed_files_are_validation_errors(bank):
     ]:
         response = client.post("/practice/import/preview", files={"file": (filename, data)})
         assert response.status_code == 422
+
+
+def test_document_import_requires_review_before_committing(bank, monkeypatch):
+    _, repo, client = bank
+    from deeptutor.services.practice.document_import import validate_candidate
+
+    candidate = {
+        "id": "1", "number": "1", "page": 1, "source_excerpt": "1. Compute 2+2",
+        "question": "Compute 2+2", "question_type": "fill_blank", "options": {},
+        "correct_answer": "", "explanation": "", "tags": [],
+        "warnings": ["Reference answer missing"], "confirmed": False, "selected": True,
+    }
+    candidate["errors"] = validate_candidate(candidate)
+
+    async def fake_parse(_data, _filename, **_kwargs):
+        return [candidate]
+
+    monkeypatch.setattr(practice, "parse_document", fake_parse)
+    response = client.post(
+        "/practice/import/document/preview",
+        files={"file": ("exam.md", b"1. Compute 2+2")},
+    )
+    assert response.status_code == 200
+    draft = response.json()
+    assert draft["items"][0]["errors"]
+    assert repo.overview("UTC")["total"] == 0
+    assert client.post("/practice/import/commit", json={"token": draft["token"]}).status_code == 422
+
+    item = {**draft["items"][0], "correct_answer": "4", "confirmed": True}
+    saved = client.patch(
+        f"/practice/import/document/{draft['token']}",
+        json={"revision": draft["revision"], "items": [item], "target": "mistakes"},
+    ).json()
+    assert saved["revision"] == 1 and saved["target"] == "mistakes"
+    assert saved["status"] == "ready" and not saved["items"][0]["errors"]
+    assert client.patch(
+        f"/practice/import/document/{draft['token']}",
+        json={"revision": draft["revision"], "items": [item], "target": "bank"},
+    ).status_code == 409
+    committed = client.post("/practice/import/commit", json={"token": draft["token"]})
+    assert committed.json() == {"created": 1, "duplicates": 0, "total": 1}
+    assert repo.overview("UTC")["mistakes"] == 1
+    assert client.post("/practice/import/commit", json={"token": draft["token"]}).json() == committed.json()
+    assert client.get(f"/practice/import/document/{draft['token']}/source").content == b"1. Compute 2+2"
+
+
+def test_markdown_document_uses_numbering_and_matching_answers_without_models():
+    from deeptutor.services.practice.document_import import parse_document
+
+    text = """一、填空题（共2题）
+1. 2 + 2 = ____
+2. 3 + 3 = ____
+参考答案
+1.【答案】4
+2.【答案】6
+"""
+    result = asyncio.run(parse_document(text.encode(), "paper.md"))
+    assert [(item["number"], item["correct_answer"], item["question_type"]) for item in result] == [
+        ("1", "4", "fill_blank"), ("2", "6", "fill_blank"),
+    ]
+    assert all(not item["errors"] for item in result)
+    assert "题目原文（第 1 页）" in result[0]["source_excerpt"]
+    assert "答案提取" in result[0]["source_excerpt"]
+    assert "2 + 2 = ____" in result[0]["source_excerpt"]
+    assert "3 + 3 = ____" not in result[0]["source_excerpt"]
+
+
+def test_answer_number_gaps_do_not_attach_later_answers_to_previous_question():
+    from deeptutor.services.practice.document_import import parse_document
+
+    text = """一、填空题（共3题）
+1. First ____
+2. Second ____
+3. Third ____
+参考答案
+1.【答案】A
+3.【答案】C
+"""
+    result = asyncio.run(parse_document(text.encode(), "paper.md"))
+    assert [item["correct_answer"] for item in result] == ["A", "", "C"]
+    assert any("未找到" in warning for warning in result[1]["warnings"])
+
+
+def test_section_heading_closes_previous_question_and_is_not_added_to_its_stem():
+    from deeptutor.services.practice.document_import import parse_document
+
+    text = """一、填空题（共1题）
+1. Fill this blank ____
+二、单选题（共1题）每题只有一个正确选项。
+2. Pick one.
+A. First B. Second
+参考答案
+1.【答案】filled
+2.【答案】A
+"""
+    result = asyncio.run(parse_document(text.encode(), "paper.md"))
+    assert len(result) == 2
+    assert "正确选项" not in result[0]["question"]
+    assert result[1]["question_type"] == "single_choice"
+
+
+def test_spaced_answer_labels_and_answer_section_headings_do_not_leak_between_answers():
+    from deeptutor.services.practice.document_import import parse_document
+
+    text = """一、填空题（共2题）
+1. First ____
+2. Second ____
+参考答案
+1.【 答 案 】A
+【 解 析 】Only explanation for the first item.
+二、单选题
+2.【 答 案 】B
+"""
+    result = asyncio.run(parse_document(text.encode(), "paper.md"))
+    assert [item["correct_answer"] for item in result] == ["A", "B"]
+    assert "Only explanation for the first item." in result[0]["explanation"]
+    assert "答案提取（答案区第 1 页）:\nA" in result[0]["source_excerpt"]
+    assert "答案提取（答案区第 1 页）:\nB" not in result[0]["source_excerpt"]
+
+
+def test_script_parser_flags_unmatched_answers_instead_of_guessing():
+    from deeptutor.services.practice.document_import import parse_document
+
+    result = asyncio.run(parse_document(
+        "1. Find x\n参考答案\n".encode(), "paper.md",
+    ))
+    assert result[0]["correct_answer"] == ""
+    assert result[0]["errors"]
+    assert any("未找到" in warning for warning in result[0]["warnings"])
+
+
+def test_script_parser_classifies_choice_options_and_answer():
+    from deeptutor.services.practice.document_import import parse_document
+
+    text = """一、单选题（共1题）
+1. 2 + 2 = ?
+A. 3 B. 4 C. 5 D. 6
+参考答案
+1.【答案】B
+"""
+    item = asyncio.run(parse_document(text.encode(), "paper.md"))[0]
+    assert item["question_type"] == "single_choice"
+    assert item["options"] == {"A": "3", "B": "4", "C": "5", "D": "6"}
+    assert item["correct_answer"] == "B"
+    assert item["errors"] == []
+
+
+def test_word_document_is_parsed_locally():
+    from docx import Document
+    from deeptutor.services.practice.document_import import parse_document
+
+    document = Document()
+    document.add_paragraph("一、填空题（共1题）")
+    document.add_paragraph("1. What is 2+2? ____")
+    document.add_paragraph("参考答案")
+    document.add_paragraph("1.【答案】4")
+    buffer = io.BytesIO()
+    document.save(buffer)
+    result = asyncio.run(parse_document(buffer.getvalue(), "paper.docx"))
+    assert result[0]["question"] == "What is 2+2? ____"
+    assert result[0]["correct_answer"] == "4"
+    assert result[0]["errors"] == []
+
+
+def test_scanned_pdf_fails_with_clear_no_ocr_message():
+    import pymupdf
+    from deeptutor.services.practice.document_import import parse_document
+
+    document = pymupdf.open()
+    document.new_page()
+    data = document.tobytes()
+    document.close()
+    with pytest.raises(ValueError, match="scanned PDFs require OCR"):
+        asyncio.run(parse_document(data, "scan.pdf"))
+
+
+def test_corrupt_word_document_reports_a_repairable_error():
+    from deeptutor.services.practice.document_import_rules import _read_document_pages
+
+    with pytest.raises(ValueError, match="docx|Word|archive|valid|read"):
+        _read_document_pages(b"not a Word archive", ".docx")
+
+
+def test_document_preview_marks_duplicates_within_the_same_draft(bank):
+    _, repo, _ = bank
+    first = {
+        "id": "1", "number": "1", "page": 1, "source_excerpt": "Q",
+        "question": "Q", "question_type": "fill_blank", "options": {},
+        "correct_answer": "A", "explanation": "", "tags": [],
+        "warnings": [], "errors": [], "confirmed": False, "selected": True,
+    }
+    token = repo.stage_document(
+        "paper.md", "bank", [first, {**first, "id": "2", "number": "2"}],
+        b"Q", "text/markdown",
+    )
+    assert [item["duplicate"] for item in repo.get_document(token)["items"]] == [False, True]
+    assert repo.commit_import(token) == {"created": 1, "duplicates": 1, "total": 2}
+
+
+def test_document_job_can_be_resumed_after_upload(bank, monkeypatch):
+    _, _, client = bank
+
+    async def fake_parse(_data, _filename, **kwargs):
+        await kwargs["progress"]({"stage": "extracting_questions", "percent": 70,
+                                   "message": "Extracted one question"})
+        return [{
+            "id": "1", "number": "1", "page": 1, "source_excerpt": "Q",
+            "question": "Q", "question_type": "fill_blank", "options": {},
+            "correct_answer": "A", "explanation": "", "tags": [], "warnings": [],
+            "errors": [], "confirmed": False, "selected": True,
+        }]
+
+    monkeypatch.setattr(practice, "parse_document", fake_parse)
+    started = client.post(
+        "/practice/import/document/start",
+        files={"file": ("exam.md", b"Q")},
+    )
+    assert started.status_code == 200
+    token = started.json()["token"]
+    for _ in range(30):
+        resumed = client.get(f"/practice/import/document/{token}").json()
+        if resumed["status"] == "ready":
+            break
+        time.sleep(0.02)
+    assert resumed["status"] == "ready"
+    assert resumed["percent"] == 100
+    assert "Extracted one question" in resumed["logs"]
+    assert resumed["items"][0]["question"] == "Q"
+    listed = client.get("/practice/import/document/jobs").json()
+    assert listed[0]["filename"] == "exam.md" and listed[0]["percent"] == 100
+
+
+def test_document_job_timeout_fails_and_can_be_retried(bank, monkeypatch):
+    _, _, client = bank
+
+    async def slow_parse(_data, _filename, **_kwargs):
+        await asyncio.sleep(1)
+        return []
+
+    monkeypatch.setattr(practice, "parse_document", slow_parse)
+    monkeypatch.setattr(practice, "DOCUMENT_JOB_TIMEOUT", 0.02)
+    started = client.post("/practice/import/document/start", files={"file": ("slow.md", b"Q")}).json()
+    token = started["token"]
+    for _ in range(40):
+        draft = client.get(f"/practice/import/document/{token}").json()
+        if draft["status"] == "failed":
+            break
+        time.sleep(0.02)
+    assert draft["status"] == "failed"
+    assert "timed out" in draft["error"]
+    assert "Failed:" in draft["logs"][-1]
+
+
+def test_queued_document_can_be_cancelled_without_starting(bank):
+    _, repo, _ = bank
+    token = repo.stage_document_job("queued.md", "bank", b"Q", "text/markdown")
+    assert repo.get_document(token)["status"] == "queued"
+    repo.cancel_document_job(token)
+    assert repo.start_document_job(token) is False
+    repo.finish_document_job(token, [])
+    draft = repo.get_document(token)
+    assert draft["status"] == "cancelled"
+    assert draft["logs"][-1] == "Parsing cancelled"
+
+
+@pytest.mark.parametrize("status", ["queued", "processing", "failed", "ready"])
+def test_uncommitted_document_jobs_can_be_deleted(bank, status):
+    _, repo, client = bank
+    token = repo.stage_document_job(f"{status}.md", "bank", b"Q", "text/markdown")
+    if status in {"processing", "failed", "ready"}:
+        repo.start_document_job(token)
+    if status == "failed":
+        repo.finish_document_job(token, [], "parse failed")
+    elif status == "ready":
+        repo.finish_document_job(token, [])
+    response = client.delete(f"/practice/import/document/{token}")
+    assert response.status_code == 200
+    assert response.json() == {"status": "deleted"}
+    assert client.get(f"/practice/import/document/{token}").status_code == 404
+
+
+def test_stalled_document_job_reports_failure_after_restart(bank):
+    _, repo, _ = bank
+    token = repo.stage_document_job("stalled.md", "bank", b"Q", "text/markdown")
+    with repo.connect() as conn:
+        conn.execute("UPDATE practice_import_jobs SET updated_at=? WHERE token=?",
+                     (time.time() - 1900, token))
+    draft = repo.get_document(token)
+    assert draft["status"] == "failed"
+    assert "retry" in draft["error"]
+
+
+def test_failed_document_job_can_retry_without_reupload(bank, monkeypatch):
+    _, _, client = bank
+    calls = 0
+
+    async def sometimes_parse(_data, _filename, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("temporary model outage")
+        return [{
+            "id": "1", "number": "1", "page": 1, "source_excerpt": "Q",
+            "question": "Q", "question_type": "fill_blank", "options": {},
+            "correct_answer": "A", "explanation": "", "tags": [], "warnings": [],
+            "errors": [], "confirmed": False, "selected": True,
+        }]
+
+    monkeypatch.setattr(practice, "parse_document", sometimes_parse)
+    started = client.post(
+        "/practice/import/document/start", files={"file": ("exam.md", b"Q")}
+    ).json()
+    token = started["token"]
+    for _ in range(30):
+        status = client.get(f"/practice/import/document/{token}").json()["status"]
+        if status == "failed":
+            break
+        time.sleep(0.02)
+    assert status == "failed"
+    assert client.post(f"/practice/import/document/{token}/retry").status_code == 200
+    for _ in range(30):
+        status = client.get(f"/practice/import/document/{token}").json()["status"]
+        if status == "ready":
+            break
+        time.sleep(0.02)
+    assert status == "ready" and calls == 2
 
 
 def test_import_receipts_and_questions_are_isolated_between_stores(bank, tmp_path):

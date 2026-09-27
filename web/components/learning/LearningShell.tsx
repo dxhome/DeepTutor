@@ -15,6 +15,7 @@ export function LearningShell({
   tabs,
   children,
   back = true,
+  wide = false,
   className = '',
   scrollRef,
   onScroll,
@@ -26,6 +27,7 @@ export function LearningShell({
   tabs?: ReactNode
   children: ReactNode
   back?: boolean
+  wide?: boolean
   className?: string
   scrollRef?: Ref<HTMLElement>
   onScroll?: UIEventHandler<HTMLElement>
@@ -37,7 +39,7 @@ export function LearningShell({
       onScroll={onScroll}
       className={`h-full min-h-0 w-full overflow-y-auto bg-[var(--background)] text-[var(--foreground)] ${className}`}
     >
-      <div className="mx-auto w-full max-w-[1180px] px-6 py-7 md:px-9 lg:py-9">
+      <div className={wide ? "w-full max-w-none px-6 py-5" : "mx-auto w-full max-w-[1180px] px-6 py-7 md:px-9 lg:py-9"}>
         {back && (
           <Link
             href={LEARNING_HUB}
@@ -62,7 +64,7 @@ export function LearningShell({
           {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
         </header>
         {tabs}
-        <div className="mt-6">{children}</div>
+        <div className={wide ? "mt-5" : "mt-6"}>{children}</div>
       </div>
     </section>
   )

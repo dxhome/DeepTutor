@@ -47,6 +47,7 @@ export const PartnerComposer = memo(function PartnerComposer({
   streaming,
   placeholder,
   restoreDraft,
+  modelLabel,
 }: {
   /** True starts a turn, "handled" consumes a client command, false keeps the draft. */
   onSend: (content: string, attachments: PartnerPendingAttachment[]) => boolean | "handled";
@@ -54,6 +55,7 @@ export const PartnerComposer = memo(function PartnerComposer({
   disabled?: boolean;
   streaming?: boolean;
   placeholder?: string;
+  modelLabel?: string;
   /** A rejected cross-browser send restores the cleared text and attachments. */
   restoreDraft?: {
     id: number;
@@ -613,7 +615,7 @@ export const PartnerComposer = memo(function PartnerComposer({
       )}
 
       <div className="flex items-center justify-between px-2 pb-2">
-        <div className="flex items-center gap-0.5">
+        <div className="flex min-w-0 items-center gap-0.5">
           <Tooltip label={t("Attach files")}>
             <button
               type="button"
@@ -655,6 +657,9 @@ export const PartnerComposer = memo(function PartnerComposer({
               </div>
             )}
           </div>
+          <span role="status" className="ml-1 max-w-[12rem] truncate text-[11px] text-[var(--muted-foreground)]" title={modelLabel || ""}>
+            {t("Model")}: {modelLabel || t("No model configured")}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <Tooltip label={voiceButtonLabel} description={recorder.error || undefined}>

@@ -31,10 +31,11 @@ export default function SpaceMain({
 }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname() ?? "";
   const isDashboard = pathname === "/space";
+  const isFullBleedQuestionImport = pathname === "/space/questions/import";
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--background)] [scrollbar-gutter:stable]">
-      <div className="mx-auto max-w-5xl px-8 py-8 pb-12">
+      <div className={isFullBleedQuestionImport ? "w-full max-w-none px-6 py-5" : "mx-auto max-w-5xl px-8 py-8 pb-12"}>
         {!isDashboard && (
           <div className="mb-5">
             <BackToHub />

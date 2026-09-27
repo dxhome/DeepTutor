@@ -21,6 +21,7 @@ import {
   branchPartnerSession,
   deletePartnerSession,
   getPartnerHistoryPage,
+  getPartner,
   getPartnerSessions,
   resumePartnerSession,
   type PartnerHistoryMessage,
@@ -31,6 +32,7 @@ import { createPartnerDraftPublisher } from "@/lib/partner-chat-draft";
 import { ReconnectingWebSocket } from "@/lib/reconnecting-websocket";
 import type { ExportableMessage } from "@/lib/chat-export";
 import type { StreamEvent } from "@/features/chat/model/protocol";
+import { listLLMOptions, llmSelectionKey } from "@/lib/llm-options";
 import type { MessageAttachment } from "@/features/chat/ChatStateAdapter";
 import { docIconFor, formatBytes, isSvgFilename } from "@/lib/doc-attachments";
 import {
@@ -300,6 +302,7 @@ function AttachmentStrip({
 export default function PartnerChat({
   partnerId,
   partnerName,
+  partnerModel,
   emoji,
   color,
   avatar,
@@ -316,6 +319,7 @@ export default function PartnerChat({
 }: {
   partnerId: string;
   partnerName: string;
+  partnerModel?: string | null;
   emoji?: string;
   color?: string;
   avatar?: string;
@@ -340,6 +344,24 @@ export default function PartnerChat({
   onSelectionStale?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [modelLabel, setModelLabel] = useState(partnerModel || "");
+  useEffect(() => {
+    let alive = true;
+    const refreshModel = async () => {
+      try {
+        const [partner, options] = await Promise.all([getPartner(partnerId), listLLMOptions()]);
+        if (!alive) return;
+        const selected = partner.llm_selection;
+        const option = selected
+          ? options.options.find(item => llmSelectionKey(item) === llmSelectionKey(selected))
+          : options.options.find(item => llmSelectionKey(item) === llmSelectionKey(options.active));
+        setModelLabel(selected ? (option?.model || "") : (partner.model || partnerModel || option?.model || ""));
+      } catch { if (alive) setModelLabel(partnerModel || ""); }
+    };
+    void refreshModel();
+    window.addEventListener("focus", refreshModel);
+    return () => { alive = false; window.removeEventListener("focus", refreshModel); };
+  }, [partnerId, partnerModel]);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [olderBefore, setOlderBefore] = useState<number | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -1365,6 +1387,7 @@ export default function PartnerChat({
           </p>
         ) : null}
         <PartnerComposer
+          modelLabel={modelLabel}
           onSend={handleSend}
           onStop={sendStop}
           streaming={streaming}

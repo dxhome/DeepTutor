@@ -51,6 +51,7 @@ class OpenAICodexProvider(LLMProvider):
         reasoning_effort: str | None,
         tool_choice: str | dict[str, Any] | None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        request_timeout: float = 60.0,
     ) -> LLMResponse:
         model_name = model or self.default_model
         model_slug = _strip_model_prefix(model_name)
@@ -86,6 +87,7 @@ class OpenAICodexProvider(LLMProvider):
                         body,
                         verify=not disable_ssl_verify_enabled(),
                         on_content_delta=on_content_delta,
+                        request_timeout=request_timeout,
                     )
                 except CodexHTTPError as exc:
                     if exc.status_code == 401:
@@ -145,8 +147,16 @@ class OpenAICodexProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        del max_tokens, temperature, kwargs
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
+        del max_tokens, temperature
+        request_timeout = _coerce_request_timeout(kwargs.get("request_timeout"))
+        return await self._call_codex(
+            messages,
+            tools,
+            model,
+            reasoning_effort,
+            tool_choice,
+            request_timeout=request_timeout,
+        )
 
     async def chat_stream(
         self,
@@ -161,7 +171,8 @@ class OpenAICodexProvider(LLMProvider):
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        del max_tokens, temperature, on_reasoning_delta, kwargs
+        del max_tokens, temperature, on_reasoning_delta
+        request_timeout = _coerce_request_timeout(kwargs.get("request_timeout"))
         return await self._call_codex(
             messages,
             tools,
@@ -169,6 +180,7 @@ class OpenAICodexProvider(LLMProvider):
             reasoning_effort,
             tool_choice,
             on_content_delta,
+            request_timeout=request_timeout,
         )
 
     def get_default_model(self) -> str:
@@ -205,8 +217,9 @@ async def _request_codex(
     body: dict[str, Any],
     verify: bool,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+    request_timeout: float = 60.0,
 ) -> tuple[str, list[ToolCallRequest], str]:
-    async with httpx.AsyncClient(timeout=60.0, verify=verify) as client:
+    async with httpx.AsyncClient(timeout=request_timeout, verify=verify) as client:
         async with client.stream("POST", url, headers=headers, json=body) as response:
             if response.status_code != 200:
                 raw = await response.aread()
@@ -222,6 +235,16 @@ async def _request_codex(
                     _friendly_error(response.status_code),
                 )
             return await consume_sse(response, on_content_delta)
+
+
+def _coerce_request_timeout(value: object) -> float:
+    if isinstance(value, bool):
+        return 60.0
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        return 60.0
+    return min(240.0, max(1.0, timeout))
 
 
 def _prompt_cache_key(messages: list[dict[str, Any]]) -> str:

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useTranslation } from 'react-i18next'
+import { useRouter } from 'next/navigation'
 import { ArrowRight, Check, ChevronDown, FileUp, Loader2, Library } from 'lucide-react'
 import { useChatWorkspaces } from '@/hooks/useChatWorkspaces'
 import { activeWorkspaceId, scopedUrl } from '@/lib/workspace-scope'
@@ -13,24 +14,23 @@ import {
   type PracticeSummary,
 } from '@/lib/practice-api'
 import { LearningShell, LearningErrorState } from '../LearningShell'
-import { useLearningCreation } from '../LibraryWorkspace'
 import { PracticeSession } from './PracticeSession'
-import { PracticeImport } from './PracticeImport'
 import { PracticeInsights } from './PracticeInsights'
+import { useLearningCreation } from '../LibraryWorkspace'
 
 export function ReviewHome() {
   const { t } = useTranslation()
   const { workspaces } = useChatWorkspaces()
+  const router = useRouter()
+  const creation = useLearningCreation(() => router.push(scopedUrl('/learning/practice/import', activeWorkspaceId())))
   const [scope, setScope] = useState('*')
   const [summary, setSummary] = useState<PracticeSummary | null>(null)
   const [error, setError] = useState('')
   const [revision, setRevision] = useState(0)
   const [session, setSession] = useState<PracticeRef[] | null>(null)
   const [starting, setStarting] = useState(false)
-  const [importing, setImporting] = useState(false)
   const [notice, setNotice] = useState('')
   const sequence = useRef(0)
-  const creation = useLearningCreation(() => setImporting(true))
   const refresh = useCallback(async () => {
     const request = ++sequence.current
     try {
@@ -116,19 +116,6 @@ export function ReviewHome() {
               <Check size={16} />
               {notice}
             </p>
-          )}
-          {importing && (
-            <PracticeImport
-              initialTarget="bank"
-              courseId=""
-              onClose={() => setImporting(false)}
-              onImported={message => {
-                setNotice(message)
-                setImporting(false)
-                setRevision(value => value + 1)
-                void refresh()
-              }}
-            />
           )}
           <section
             className="overflow-hidden rounded-2xl border border-border bg-card"

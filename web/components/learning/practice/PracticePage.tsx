@@ -11,8 +11,7 @@ import { getPracticeQueue, getPracticeSummary, type PracticeSummary } from "@/li
 import { LearningErrorState, LearningShell } from "../LearningShell";
 import { ReviewHome } from "./ReviewHome";
 import { WorkspaceLabel } from "../LibraryWorkspace";
-import { activeWorkspaceId } from "@/lib/workspace-scope";
-import { PracticeImport } from "./PracticeImport";
+import { activeWorkspaceId, scopedUrl } from "@/lib/workspace-scope";
 import { PracticeSession } from "./PracticeSession";
 import { PracticeInsights } from "./PracticeInsights";
 
@@ -20,10 +19,10 @@ import { PracticeInsights } from "./PracticeInsights";
 export function PracticePage({ mode = "practice" }: { mode?: "practice" | "library" }) {
   const search = useSearchParams();
   if (mode === "practice" && !search.has("course") && !search.has("question")) return <ReviewHome />;
-  return <ScopedPracticePage mode={mode} initialImport={search.get("create") === "1"} />;
+  return <ScopedPracticePage mode={mode} />;
 }
 
-function ScopedPracticePage({ mode, initialImport }: { mode: "practice" | "library"; initialImport: boolean }) {
+function ScopedPracticePage({ mode }: { mode: "practice" | "library" }) {
   const { t } = useTranslation();
   const libraryOnly = mode === "library";
   const pageRoute = libraryOnly ? questionBankRoute : practiceRoute;
@@ -33,7 +32,6 @@ function ScopedPracticePage({ mode, initialImport }: { mode: "practice" | "libra
   const tab = search.get("view") === "mistakes" ? "mistakes" : "bank";
   const [summary, setSummary] = useState<PracticeSummary | null>(null);
   const [error, setError] = useState("");
-  const [importOpen, setImportOpen] = useState(initialImport);
   const [notice, setNotice] = useState("");
   const [revision, setRevision] = useState(0);
   const [session, setSession] = useState<number[] | null>(() => {
@@ -107,8 +105,11 @@ function ScopedPracticePage({ mode, initialImport }: { mode: "practice" | "libra
         !session && (
           <button
             type="button"
-            onClick={() => setImportOpen(open => !open)}
-            aria-expanded={importOpen}
+            onClick={() => {
+              const query = new URLSearchParams(search.toString());
+              query.delete("create");
+              router.push(scopedUrl(`${libraryOnly ? "/space/questions" : "/learning/practice"}/import?${query.toString()}`, activeWorkspaceId()));
+            }}
             className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium hover:bg-muted"
           >
             <FileUp size={16} />
@@ -148,20 +149,6 @@ function ScopedPracticePage({ mode, initialImport }: { mode: "practice" | "libra
               <Check size={16} className="mt-0.5 shrink-0 text-emerald-600" />
               {notice}
             </div>
-          )}
-          {importOpen && (
-            <PracticeImport
-              key={tab}
-              initialTarget={tab}
-              courseId={courseId}
-              onClose={() => setImportOpen(false)}
-              onImported={message => {
-                setNotice(message);
-                setImportOpen(false);
-                setRevision(value => value + 1);
-                void refresh();
-              }}
-            />
           )}
           {error && <LearningErrorState message={error} onRetry={() => void refresh()} />}
           {!libraryOnly && <PracticeInsights courseId={courseId} revision={revision} />}
