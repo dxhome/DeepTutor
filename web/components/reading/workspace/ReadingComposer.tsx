@@ -6,7 +6,8 @@
  *
  * A reading conversation is a chat session like any other, so it gets the
  * whole composer: attachments, the knowledge-base picker (with real scope
- * activation, not a reading-local facsimile), the model selector, dictation.
+ * activation, not a reading-local facsimile), dictation. It uses the
+ * configured default model, like the main chat page.
  * The one thing specific to this surface is grounding: when the learner has
  * a passage selected, the pending viewport/quote has to reach the backend
  * before the message does, exactly like the retired bespoke textarea did.

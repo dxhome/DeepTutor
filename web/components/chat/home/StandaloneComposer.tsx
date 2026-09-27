@@ -174,10 +174,9 @@ interface StandaloneComposerProps {
   /** Drop the capability chip — for a surface that names its mode elsewhere. */
   showCapabilityChip?: boolean;
   /**
-   * Knowledge-base scope and pinned model are session-level state on some
-   * surfaces (mastery study) and composer-local on others (quiz follow-up).
-   * Passing a value makes that control controlled; omitting it leaves the
-   * composer owning it.
+   * Knowledge-base scope is session-level state on some surfaces. The model
+   * fields are accepted only to clear selections persisted by older versions;
+   * conversations always use the configured default model.
    */
   selectedKnowledgeBases?: string[];
   onKnowledgeBasesChange?: (names: string[]) => void;
@@ -313,10 +312,6 @@ function StandaloneComposerImpl({
   const [activeLLMDefault, setActiveLLMDefault] = useState<LLMSelection | null>(
     null,
   );
-  const [ownLLMSelection, setOwnLLMSelection] = useState<LLMSelection | null>(
-    null,
-  );
-  const llmSelection = controlledLLMSelection ?? ownLLMSelection;
   const [llmOptionsLoading, setLLMOptionsLoading] = useState(true);
   const [llmOptionsError, setLLMOptionsError] = useState(false);
 
@@ -389,21 +384,11 @@ function StandaloneComposerImpl({
     };
   }, []);
 
-  // Default to the server-side active LLM until the user picks one. A
-  // controlled surface owns that decision itself.
+  // Conversation model choice is global configuration. Clear any selection
+  // restored from older per-session state so these surfaces use that default.
   useEffect(() => {
-    if (controlledLLMSelection !== undefined) return;
-    if (ownLLMSelection || !activeLLMDefault) return;
-    setOwnLLMSelection(activeLLMDefault);
-  }, [activeLLMDefault, controlledLLMSelection, ownLLMSelection]);
-
-  const applyLLMSelection = useCallback(
-    (selection: LLMSelection | null) => {
-      if (controlledLLMSelection === undefined) setOwnLLMSelection(selection);
-      onLLMSelectionChange?.(selection);
-    },
-    [controlledLLMSelection, onLLMSelectionChange],
-  );
+    if (controlledLLMSelection) onLLMSelectionChange?.(null);
+  }, [controlledLLMSelection, onLLMSelectionChange]);
 
   const applyKnowledgeBases = useCallback(
     (names: string[]) => {
@@ -764,7 +749,7 @@ function StandaloneComposerImpl({
         questionNotebookReferences: selectedQuestionEntries.map((e) => e.id),
         memoryReferences: [...selectedMemoryFiles],
         persona: selectedPersona,
-        llmSelection,
+        llmSelection: null,
         subagentBudget: selectedAgent ? subagentBudget : null,
       });
 
@@ -796,7 +781,6 @@ function StandaloneComposerImpl({
       isQuizMode,
       isResearchMode,
       isVisualizeMode,
-      llmSelection,
       notebookReferencesPayload,
       onSubmit,
       quizConfig,
@@ -914,7 +898,8 @@ function StandaloneComposerImpl({
         onPersonaSelectorOpenChange={setPersonaSelectorOpen}
         llmOptions={llmOptions}
         activeLLMDefault={activeLLMDefault}
-        llmSelection={llmSelection}
+        allowModelSelection={false}
+        llmSelection={null}
         llmOptionsLoading={llmOptionsLoading}
         llmOptionsError={llmOptionsError}
         selectedBookReferences={selectedBookReferences}
@@ -936,7 +921,7 @@ function StandaloneComposerImpl({
         onSetCapMenuOpen={setCapMenuOpen}
         onSetSpaceMenuOpen={setSpaceMenuOpen}
         onToggleKB={handleToggleKB}
-        onSelectLLM={applyLLMSelection}
+        onSelectLLM={() => {}}
         onSelectNotebookPicker={() => setShowNotebookPicker(true)}
         onSelectBookPicker={() => setShowBookPicker(true)}
         onSelectHistoryPicker={() => setShowHistoryPicker(true)}

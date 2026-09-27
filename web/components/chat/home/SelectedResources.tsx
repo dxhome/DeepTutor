@@ -21,6 +21,8 @@ const kinds: Record<string, ResourceKind> = {
   kb: "knowledge",
   persona: "persona",
   collaborator: "agent",
+  partner: "partner",
+  "partner-group": "partner_group",
   skill: "skills",
   mcp: "mcp",
 };

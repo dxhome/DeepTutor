@@ -5,10 +5,9 @@
  * sending through the unified chat context.
  *
  * A mastery session is a chat session, so the learner gets the whole
- * composer: attachments, `@`-space references, the knowledge picker, the
- * model selector, dictation, and the Skills/MCP narrowing Chat uses. Those
- * last controls are session-scoped rather than per-turn — knowledge bases,
- * the pinned model, and the resource selection — so they are driven
+ * composer: attachments, `@`-space references, the knowledge picker,
+ * dictation, and the Skills/MCP narrowing Chat uses. Session-scoped controls
+ * such as knowledge bases and resource selection are driven
  * straight off the session state instead of a second copy inside the
  * composer.
  *
