@@ -446,7 +446,7 @@ async def _run_document_import_job(
         await asyncio.to_thread(repo.finish_document_job, token, [], detail)
     except TimeoutError as exc:
         detail = (
-            f"Document import exceeded the {DOCUMENT_JOB_TIMEOUT}s job timeout.\n"
+            f"Document import timed out after exceeding the {DOCUMENT_JOB_TIMEOUT}s job timeout.\n"
             + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         )
         await asyncio.to_thread(

@@ -597,6 +597,7 @@ async def require_admin(
 _LEARNER_KB_READ_ROUTES = frozenset(
     {
         "/api/knowledge-bases",
+        "/api/knowledge-bases/list",
         "/api/knowledge-bases/{kb_name}",
         "/api/knowledge-bases/{kb_name}/files",
         "/api/knowledge-bases/{kb_name}/files/{filename:path}",
